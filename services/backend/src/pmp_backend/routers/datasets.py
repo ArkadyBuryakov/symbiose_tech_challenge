@@ -144,6 +144,7 @@ async def get_current(
         dataset_id=dataset.id,
         seq=current.seq,
         sha256=current.sha256,
+        spec_sha256=current.spec_sha256,
         size_bytes=current.size_bytes,
         url=tile_url(
             visibility=dataset.visibility.value,
@@ -202,6 +203,7 @@ async def set_current(
         dataset_id=dataset.id,
         seq=version.seq,
         sha256=version.sha256,
+        spec_sha256=version.spec_sha256,
         size_bytes=version.size_bytes,
         url=tile_url(
             visibility=dataset.visibility.value,

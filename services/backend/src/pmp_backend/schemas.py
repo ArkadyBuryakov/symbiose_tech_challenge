@@ -140,6 +140,7 @@ class VersionSummary(BaseModel):
     id: UUID
     seq: int
     sha256: str
+    spec_sha256: str = Field(description="Digest of the version's layer/style spec.")
     size_bytes: int
     status: VersionStatus
     is_current: bool
@@ -163,6 +164,7 @@ class CurrentVersionResponse(BaseModel):
     dataset_id: UUID
     seq: int
     sha256: str
+    spec_sha256: str
     size_bytes: int
     url: str
     visibility: Visibility

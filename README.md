@@ -155,7 +155,10 @@ browser then holds three `CloudFront-*` cookies scoped to `/tiles/private/`.
 Sign in as Bob and open the same map: the tiles are `403` — Bob's cookie is
 valid, but for tenant-b.
 
-**Versioning and rollback.** Publish two different archives to the same slug,
+**Versioning and rollback.** A version is the archive bytes *plus* the
+layer/style spec: republishing the same file with an edited spec creates a new
+version (sharing the stored object), while the same file and same spec is
+`DEDUPLICATED`. Publish two different archives to the same slug,
 then use *Versions → Make current* on the datasets page. Rollback moves a
 pointer; nothing is copied or deleted.
 

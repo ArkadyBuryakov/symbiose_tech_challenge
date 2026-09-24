@@ -569,3 +569,31 @@ which should have happened before the first delivery.
 **Why.** Tenants are provisioned, not self-served, on this platform; the CLI
 reuses BetterAuth for password hashing and writes memberships exactly as the
 seed does.
+
+### A version is the archive bytes *and* the spec (changes the brief's rule)
+**Decision.** Version identity is `(sha256, spec_sha256)`, where `spec_sha256` is
+the SHA-256 of the spec in canonical JSON (sorted keys, no whitespace). Same
+bytes with a new spec → `CREATED` (new version); same bytes and same spec →
+`DEDUPLICATED`; an older AVAILABLE pair → `POINTER_MOVED`. Migration 0002 adds
+the column, backfills it with the worker's own digest function, and moves the
+live-uniqueness index to `(dataset_id, sha256, spec_sha256)`.
+**Alternatives.** The brief's bytes-only rule (republishing with a new spec was
+reported `DEDUPLICATED` and the spec silently discarded); a mutable
+`PUT .../current/spec` (breaks version immutability, rollback cannot restore
+styling, no history); rejecting spec-only changes with an error.
+**Why.** For a spec-driven map the spec is part of what a version *is*. No
+storage cost: the object key stays addressed by the bytes alone, so both
+versions share one object and the worker skips the copy. Rollback restores the
+styling with the pointer. Agreed with the product owner before implementing,
+because it changes a rule the brief set explicitly.
+
+### OpenStreetMap basemap and a ramp that contrasts with it
+**Decision.** The map uses the standard OSM raster tiles
+(`tile.openstreetmap.org`, attributed, saturation slightly reduced), and the
+data ramp is ColorBrewer YlOrRd instead of green.
+**Why.** The sample data is a forest, which OSM draws green; a green ramp made
+low-density cells disappear into the basemap. YlOrRd is colour-blind safe and
+distinct from every OSM land-use colour. OSM's tile usage policy allows light
+interactive use with attribution but not production traffic, so a deployment
+should switch the tile URL to its own or a commercial tile service (one line in
+`web/assets/map-page.js`).

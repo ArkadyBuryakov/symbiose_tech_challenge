@@ -31,7 +31,13 @@ from pmp_common.events import EventEnvelope, PublicationFailed, PublicationSucce
 from pmp_common.ids import new_uuid
 from pmp_common.logging import get_logger
 from pmp_common.tables import dataset_versions, datasets, outbox, publication_jobs
-from pmp_common.versioning import DatasetState, VersionDecision, decide_version
+from pmp_common.versioning import (
+    DatasetState,
+    VersionDecision,
+    VersionKey,
+    decide_version,
+    spec_digest,
+)
 
 __all__ = [
     "ClaimedJob",
@@ -174,7 +180,9 @@ def load_dataset_state(conn: Connection, dataset_id: UUID) -> tuple[Row[Any], Da
         raise LookupError(f"dataset {dataset_id} does not exist")
 
     available = conn.execute(
-        select(dataset_versions.c.sha256, dataset_versions.c.seq).where(
+        select(
+            dataset_versions.c.sha256, dataset_versions.c.spec_sha256, dataset_versions.c.seq
+        ).where(
             and_(
                 dataset_versions.c.dataset_id == dataset_id,
                 dataset_versions.c.status == VersionStatus.AVAILABLE.value,
@@ -183,21 +191,24 @@ def load_dataset_state(conn: Connection, dataset_id: UUID) -> tuple[Row[Any], Da
     ).all()
 
     current_seq: int | None = None
-    current_sha: str | None = None
+    current_key: VersionKey | None = None
     if dataset.current_version_id is not None:
         current = conn.execute(
-            select(dataset_versions.c.seq, dataset_versions.c.sha256).where(
-                dataset_versions.c.id == dataset.current_version_id
-            )
+            select(
+                dataset_versions.c.seq,
+                dataset_versions.c.sha256,
+                dataset_versions.c.spec_sha256,
+            ).where(dataset_versions.c.id == dataset.current_version_id)
         ).one_or_none()
         if current is not None:
-            current_seq, current_sha = current.seq, current.sha256
+            current_seq = current.seq
+            current_key = VersionKey(current.sha256, current.spec_sha256)
 
     state = DatasetState(
         latest_seq=dataset.latest_seq,
         current_seq=current_seq,
-        current_sha256=current_sha,
-        available_shas={row.sha256: row.seq for row in available},
+        current_key=current_key,
+        available={VersionKey(row.sha256, row.spec_sha256): row.seq for row in available},
     )
     return dataset, state
 
@@ -221,7 +232,10 @@ def apply_publication(
     replays the message.
     """
     dataset, state = load_dataset_state(conn, job.dataset_id)
-    decision = decide_version(state, sha256)
+    # A version is the bytes *and* the spec: same archive with a new spec is a
+    # new version (sharing the same stored object), not a deduplication.
+    spec_sha256 = spec_digest(job.spec)
+    decision = decide_version(state, VersionKey(sha256, spec_sha256))
 
     version_id = _apply_decision(
         conn,
@@ -229,6 +243,7 @@ def apply_publication(
         dataset=dataset,
         job=job,
         sha256=sha256,
+        spec_sha256=spec_sha256,
         size_bytes=size_bytes,
         object_key=object_key,
         source_etag=source_etag,
@@ -270,6 +285,7 @@ def apply_publication(
             version_id=version_id,
             version_seq=decision.seq,
             sha256=sha256,
+            spec_sha256=spec_sha256,
             size_bytes=size_bytes,
             object_key=object_key,
             visibility=visibility,
@@ -285,6 +301,7 @@ def _apply_decision(
     dataset: Row[Any],
     job: ClaimedJob,
     sha256: str,
+    spec_sha256: str,
     size_bytes: int,
     object_key: str,
     source_etag: str,
@@ -310,7 +327,7 @@ def _apply_decision(
         return UUID(str(existing))
 
     version_id = new_uuid()
-    # ON CONFLICT DO NOTHING on the live-sha partial unique index: if a
+    # ON CONFLICT DO NOTHING on the live (sha256, spec_sha256) unique index: if a
     # concurrent transaction inserted the same content first, fall through to
     # reading its row rather than failing the job.
     inserted = conn.execute(
@@ -320,6 +337,7 @@ def _apply_decision(
             dataset_id=job.dataset_id,
             seq=decision.seq,
             sha256=sha256,
+            spec_sha256=spec_sha256,
             size_bytes=size_bytes,
             object_key=object_key,
             source_key=job.source_key,
@@ -340,6 +358,7 @@ def _apply_decision(
                 and_(
                     dataset_versions.c.dataset_id == job.dataset_id,
                     dataset_versions.c.sha256 == sha256,
+                    dataset_versions.c.spec_sha256 == spec_sha256,
                     dataset_versions.c.status != VersionStatus.RETIRED.value,
                 )
             )

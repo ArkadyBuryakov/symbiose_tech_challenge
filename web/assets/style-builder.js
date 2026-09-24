@@ -18,11 +18,15 @@
  * global range would wash the fine layers out entirely.
  */
 
-/** Sequential green ramp — forest data, dark = dense. Colour-blind safe. */
-const RAMP = ["#f2f7f2", "#cde5d3", "#9ccfaf", "#65b58b", "#33986a", "#0f7749", "#08552f"];
+/**
+ * Sequential yellow-orange-red ramp (ColorBrewer YlOrRd), dark = dense.
+ * Colour-blind safe, and chosen to contrast with the OSM basemap: the data sits
+ * on forest, which OSM draws green, so a green ramp would vanish into it.
+ */
+const RAMP = ["#ffffcc", "#ffeda0", "#fed976", "#feb24c", "#fd8d3c", "#f03b20", "#bd0026"];
 
 /** Solid colour for layers that do not carry the colour field. */
-const POINT_COLOR = "#f0b429";
+const POINT_COLOR = "#1d4e89";
 
 const SOURCE_ID = "pmtiles-source";
 
@@ -120,8 +124,9 @@ function layersFor(entry, spec, field, vectorLayers) {
                 paint: {
                     "circle-color": color,
                     "circle-opacity": 0.9,
+                    // Light outline so points read against the basemap.
                     "circle-stroke-color": "#ffffff",
-                    "circle-stroke-width": 0.6,
+                    "circle-stroke-width": 1,
                     // Points are only shown at high zoom; grow them with zoom so
                     // they stay clickable without swamping the view.
                     "circle-radius": [

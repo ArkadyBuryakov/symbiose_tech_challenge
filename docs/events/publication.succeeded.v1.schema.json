@@ -76,6 +76,21 @@
       "title": "Size Bytes",
       "type": "integer"
     },
+    "spec_sha256": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "minLength": 64,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Digest of the layer/style spec; with sha256, the version's identity. Optional so that events emitted before it existed still validate.",
+      "title": "Spec Sha256"
+    },
     "status": {
       "const": "SUCCEEDED",
       "default": "SUCCEEDED",

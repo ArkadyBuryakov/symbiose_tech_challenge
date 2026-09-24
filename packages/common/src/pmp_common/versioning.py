@@ -6,30 +6,72 @@ own. The worker calls it while holding a row lock on the dataset
 (``SELECT ... FOR UPDATE``) and then applies the returned decision inside the
 same transaction.
 
-The rules (content addressing makes republication idempotent):
+A version is identified by **what the map will show**: the archive bytes *and*
+the layer/style spec published with them. Both are reduced to SHA-256 digests
+and together form the :class:`VersionKey`.
 
 ==================================================  ====================================
 Situation                                           Outcome
 ==================================================  ====================================
-sha256 equals the *current* version                 nothing changes, ``DEDUPLICATED``
-sha256 equals an older ``AVAILABLE`` version        pointer moves back, ``POINTER_MOVED``
-sha256 is new, or only matches a ``RETIRED`` one    new version ``latest_seq + 1``,
+key equals the *current* version                    nothing changes, ``DEDUPLICATED``
+key equals an older ``AVAILABLE`` version           pointer moves back, ``POINTER_MOVED``
+key is new (new bytes, new spec, or both), or
+only matches a ``RETIRED`` version                  new version ``latest_seq + 1``,
                                                     ``CREATED``
 ==================================================  ====================================
 
+Republishing identical bytes with a changed spec therefore creates a new
+version. It costs no storage: the archive's object key is content-addressed by
+the bytes alone, so both versions point at the same object and the copy is
+skipped. Rolling back restores the old styling along with the old pointer.
+
 A ``RETIRED`` version is deliberately *not* reused: retiring is how an operator
-says "never serve these bytes again", so an identical upload must get a fresh
+says "never serve this again", so an identical publication must get a fresh
 version row rather than silently resurrecting the retired one.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import Any, NamedTuple
 
 from .enums import PublicationResult
 
-__all__ = ["DatasetState", "VersionDecision", "decide_version"]
+__all__ = ["DatasetState", "VersionDecision", "VersionKey", "decide_version", "spec_digest"]
+
+_HEX = frozenset("0123456789abcdef")
+
+
+def spec_digest(spec: Mapping[str, Any] | None) -> str:
+    """SHA-256 of a spec in canonical JSON form.
+
+    Canonical means sorted keys, no insignificant whitespace, UTF-8: two specs
+    that differ only in key order or formatting are the same spec. ``None``
+    (no spec) has a digest too, so "no spec" is a value that compares like any
+    other rather than a special case.
+    """
+    canonical = json.dumps(spec, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _check_hex(name: str, value: str) -> None:
+    if len(value) != 64 or not set(value) <= _HEX:
+        raise ValueError(f"{name} must be 64 lowercase hex characters, got {value!r}")
+
+
+class VersionKey(NamedTuple):
+    """What identifies a version: the archive bytes plus the spec."""
+
+    sha256: str
+    spec_sha256: str
+
+    def validate(self) -> VersionKey:
+        _check_hex("sha256", self.sha256)
+        _check_hex("spec_sha256", self.spec_sha256)
+        return self
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,11 +84,11 @@ class DatasetState:
     current_seq: int | None = None
     """Sequence of the version the dataset pointer currently points at."""
 
-    current_sha256: str | None = None
-    """Content hash of the current version, if the dataset has one."""
+    current_key: VersionKey | None = None
+    """Key of the current version, if the dataset has one."""
 
-    available_shas: Mapping[str, int] = field(default_factory=dict)
-    """``sha256 -> seq`` for every version whose status is ``AVAILABLE``."""
+    available: Mapping[VersionKey, int] = field(default_factory=dict)
+    """``key -> seq`` for every version whose status is ``AVAILABLE``."""
 
     def __post_init__(self) -> None:
         if self.latest_seq < 0:
@@ -67,21 +109,16 @@ class VersionDecision:
     move_pointer: bool
     """Update ``datasets.current_version_id`` (and ``latest_seq`` when creating)."""
 
-    @property
-    def new_latest_seq(self) -> int:
-        return self.seq if self.create_version else -1
 
-
-def decide_version(state: DatasetState, sha256: str) -> VersionDecision:
-    """Decide what publishing ``sha256`` into ``state`` should do.
+def decide_version(state: DatasetState, key: VersionKey) -> VersionDecision:
+    """Decide what publishing ``key`` into ``state`` should do.
 
     Pure: no I/O, no clock, no randomness. Same inputs, same decision.
     """
-    if len(sha256) != 64 or not all(c in "0123456789abcdef" for c in sha256):
-        raise ValueError(f"sha256 must be 64 lowercase hex characters, got {sha256!r}")
+    key.validate()
 
-    if state.current_sha256 == sha256:
-        # Republishing the bytes that are already live: a no-op the client can
+    if state.current_key == key:
+        # The map would look exactly as it does now: a no-op the client can
         # retry freely.
         assert state.current_seq is not None
         return VersionDecision(
@@ -91,10 +128,10 @@ def decide_version(state: DatasetState, sha256: str) -> VersionDecision:
             move_pointer=False,
         )
 
-    existing_seq = state.available_shas.get(sha256)
+    existing_seq = state.available.get(key)
     if existing_seq is not None:
-        # These bytes already have a version row; publishing them again is a
-        # rollback expressed as an upload. No copy, no new row.
+        # This exact bytes+spec combination already has a version row;
+        # publishing it again is a rollback expressed as a publication.
         return VersionDecision(
             result=PublicationResult.POINTER_MOVED,
             seq=existing_seq,

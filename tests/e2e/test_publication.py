@@ -65,6 +65,46 @@ def test_3_identical_content_under_a_new_key_is_deduplicated(
     assert len(alice.versions(first["dataset_id"])) == 1
 
 
+def test_3b_same_bytes_with_a_new_spec_is_a_new_version_sharing_the_object(
+    alice: Session, slug: str, archive_v1: Archive, spec: dict | None
+) -> None:
+    """Regression: republishing identical bytes with an updated spec used to be
+    DEDUPLICATED, silently discarding the new spec."""
+    original = spec or {"style": {"color_field": "count"}}
+    updated = {**original, "style": {**original.get("style", {}), "max": 999}}
+
+    first = alice.publish_and_wait(slug, archive_v1, spec=original)
+    second = alice.publish_and_wait(slug, archive_v1, spec=updated)
+    dataset_id = first["dataset_id"]
+
+    assert first["result"] == "CREATED"
+    assert second["result"] == "CREATED"
+    assert second["result_version_seq"] == 2
+
+    current = alice.current(dataset_id)
+    assert current["spec"]["style"]["max"] == 999
+    v1, v2 = sorted(alice.versions(dataset_id), key=lambda v: v["seq"])
+    # Same bytes: one stored object shared by both versions, no second copy.
+    assert v1["sha256"] == v2["sha256"] == archive_v1.sha256
+    assert v1["spec_sha256"] != v2["spec_sha256"]
+    tile = httpx.get(f"{BASE_URL}{current['url']}", headers={"Range": "bytes=0-6"})
+    assert tile.status_code == 206
+
+    # Identical bytes *and* spec is still a no-op.
+    again = alice.publish_and_wait(slug, archive_v1, spec=updated)
+    assert again["result"] == "DEDUPLICATED"
+
+    # Rolling back restores the old styling, not just the old pointer.
+    assert alice.put(f"{API}/datasets/{dataset_id}/current", json={"seq": 1}).status_code == 200
+    assert alice.current(dataset_id)["spec"] == original
+
+    # And republishing the original pair is recognised as that version.
+    alice.put(f"{API}/datasets/{dataset_id}/current", json={"seq": 2})
+    back = alice.publish_and_wait(slug, archive_v1, spec=original)
+    assert back["result"] == "POINTER_MOVED"
+    assert back["result_version_seq"] == 1
+
+
 def test_4_new_content_becomes_version_2_and_rollback_restores_version_1(
     alice: Session, slug: str, archive_v1: Archive, archive_v2: Archive
 ) -> None:

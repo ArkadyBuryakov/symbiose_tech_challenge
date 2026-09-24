@@ -207,6 +207,7 @@ async def list_versions(
             dataset_versions.c.id,
             dataset_versions.c.seq,
             dataset_versions.c.sha256,
+            dataset_versions.c.spec_sha256,
             dataset_versions.c.size_bytes,
             dataset_versions.c.status,
             dataset_versions.c.job_id,

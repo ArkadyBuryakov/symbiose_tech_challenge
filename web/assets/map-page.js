@@ -25,13 +25,35 @@ const panelEl = document.getElementById("panel");
 const panelTitle = document.getElementById("panel-title");
 const panelBody = document.getElementById("panel-body");
 
-// A blank raster-free base: the point is the data, and it keeps the page free
-// of a third-party basemap dependency.
+// Basemap: the standard OpenStreetMap raster tiles.
+//
+// The OSM tile usage policy (https://operations.osmfoundation.org/policies/tiles/)
+// requires visible attribution and forbids heavy use; that is fine for an
+// interactive demo, but a production deployment should point this at its own
+// or a commercial tile service. Tiles exist up to z19; MapLibre overzooms them
+// for the data's deeper levels (the dataset goes to z22).
 const BASE_STYLE = {
     version: 8,
-    sources: {},
-    layers: [{ id: "background", type: "background", paint: { "background-color": "#101418" } }],
-    glyphs: "https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-style-spec@23.4.0/dist/glyphs/{fontstack}/{range}.pbf",
+    sources: {
+        osm: {
+            type: "raster",
+            tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+            tileSize: 256,
+            maxzoom: 19,
+            attribution:
+                '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        },
+    },
+    layers: [
+        { id: "background", type: "background", paint: { "background-color": "#e8e6e1" } },
+        {
+            id: "osm",
+            type: "raster",
+            source: "osm",
+            // Slightly muted so the data, not the basemap, carries the colour.
+            paint: { "raster-saturation": -0.35, "raster-opacity": 0.95 },
+        },
+    ],
 };
 
 function fail(message, detail) {
@@ -107,7 +129,7 @@ async function main() {
         // Capped at the archive's own max zoom: the spec's zoom windows end
         // there, so zooming further would show an empty map.
         maxZoom: current.pmtiles_header?.max_zoom ?? 22,
-        attributionControl: { compact: true },
+        attributionControl: { compact: false },
     });
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
     map.addControl(new maplibregl.ScaleControl({ maxWidth: 120 }), "bottom-right");

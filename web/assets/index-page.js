@@ -194,17 +194,17 @@ async function loadDatasets() {
 async function showVersions(dataset) {
     els.detail.hidden = false;
     els.detailTitle.textContent = `Versions of ${dataset.name}`;
-    emptyRow(els.versions, 7, "Loading…");
+    emptyRow(els.versions, 8, "Loading…");
 
     let versions;
     try {
         versions = await api.listVersions(dataset.id);
     } catch (error) {
-        emptyRow(els.versions, 7, `Could not load versions: ${error.message}`);
+        emptyRow(els.versions, 8, `Could not load versions: ${error.message}`);
         return;
     }
     if (versions.length === 0) {
-        emptyRow(els.versions, 7, "No versions published yet.");
+        emptyRow(els.versions, 8, "No versions published yet.");
         return;
     }
 
@@ -217,6 +217,13 @@ async function showVersions(dataset) {
         sha.className = "mono";
         sha.title = version.sha256;
         sha.textContent = version.sha256.slice(0, 12) + "…";
+
+        // Same content with a different spec is a separate version; showing
+        // both digests is what makes that visible.
+        const spec = tr.insertCell();
+        spec.className = "mono";
+        spec.title = version.spec_sha256;
+        spec.textContent = version.spec_sha256.slice(0, 8) + "…";
 
         tr.insertCell().textContent = formatBytes(version.size_bytes);
         tr.insertCell().appendChild(pill(version.status));

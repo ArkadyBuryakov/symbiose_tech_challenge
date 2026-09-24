@@ -84,6 +84,13 @@ class PublicationSucceeded(EventEnvelope):
     version_id: UUID
     version_seq: int = Field(ge=1)
     sha256: str = Field(min_length=64, max_length=64)
+    spec_sha256: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        description="Digest of the layer/style spec; with sha256, the version's identity. "
+        "Optional so that events emitted before it existed still validate.",
+    )
     size_bytes: int = Field(ge=0)
     object_key: str
     visibility: Visibility

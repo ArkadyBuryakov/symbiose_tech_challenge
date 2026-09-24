@@ -59,6 +59,7 @@ dataset_versions = Table(
     Column("dataset_id", Uuid, nullable=False),
     Column("seq", Integer, nullable=False),
     Column("sha256", Text, nullable=False),
+    Column("spec_sha256", Text, nullable=False),
     Column("size_bytes", BigInteger, nullable=False),
     Column("object_key", Text, nullable=False),
     Column("source_key", Text, nullable=False),
