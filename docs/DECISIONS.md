@@ -113,3 +113,64 @@ bridged into the same renderer for third-party libraries.
 so `get_logger(__name__)` binds `module` as an initial value on the lazy proxy
 instead — binding it eagerly would freeze the pre-configuration renderer into
 module-level loggers.
+
+---
+
+## Phase 1 — core API
+
+### `Idempotency-Key` is required on `POST /publications`
+**Decision.** The header is mandatory; `(tenant_id, idempotency_key)` is unique,
+and a replay returns the original job with `idempotent_replay: true`.
+**Alternatives.** Optional header; deduplicating on `(dataset, source_key)`.
+**Why.** Publication is expensive and asynchronous, so a client that times out
+*will* retry. Making the key mandatory means the safe behaviour is the only
+behaviour. Deduplicating on the source key instead would wrongly collapse two
+genuinely separate publications of the same staged object.
+
+### Commit the job, then produce to Kafka
+**Decision.** `POST /publications` commits the `PENDING` job row and only then
+produces `publication.requested`, outside the transaction.
+**Alternatives.** Produce inside the transaction; a full outbox on the backend
+side as well.
+**Why.** The two failure modes are not symmetric. Commit-then-produce can lose
+the message, which the worker's reconciler repairs by re-emitting PENDING jobs.
+Produce-then-commit can deliver a message referencing a job that was rolled
+back, which nothing can repair. A backend-side outbox would close the gap
+completely, but it would need the relay to run somewhere — and the worker
+already has one, so the reconciler covers this case at no extra cost. The
+worker's own results *do* go through an outbox, because there the write and the
+event must be atomic.
+
+### The backend never inserts version rows
+**Decision.** `backend_svc` has `SELECT` on `dataset_versions` and no more; only
+`worker_svc` inserts. Rollback is a pointer update on `datasets`.
+**Alternatives.** Letting the backend write versions for "simple" cases.
+**Why.** One writer means the versioning rules exist in exactly one place, and
+the grant makes that structural rather than a convention.
+
+### Tenant scoping is a parameter, not a filter applied later
+**Decision.** Every repository function takes `tenant_id` (or an explicit
+`is_admin=True`) and applies it inside the query.
+**Alternatives.** Row-level security in Postgres; filtering results in the
+router.
+**Why.** There is no code path that forgets the predicate, because there is no
+query without it. RLS would be stronger still, but it needs a per-request
+`SET LOCAL` on a pooled connection — real complexity for a second control while
+the first one is a one-line parameter.
+
+### `BACKEND_AUTH_MODE=dev_stub`
+**Decision.** A development identity mode that refuses to start unless
+`ENVIRONMENT=local`, so the API could be built and exercised before the gateway
+and auth service existed.
+**Alternatives.** Building the gateway first; leaving the endpoints unprotected.
+**Why.** It keeps the phases independently runnable. The guard in settings is
+what makes it safe: the mode cannot be switched on in any other environment.
+
+### `/datasets/{id}/current` is an indirection, not a redirect
+**Decision.** It returns a *relative* edge path to the immutable archive, and is
+cached for ~30 s.
+**Alternatives.** A 302 to the object; an absolute URL.
+**Why.** The relative path makes the same response correct behind `localhost`
+and behind a CloudFront domain. The short cache on this response plus
+`immutable` on the archive gives the best of both: a version switch is visible
+within 30 seconds, while the tiles themselves are never revalidated.

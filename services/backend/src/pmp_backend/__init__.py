@@ -1,1 +1,1 @@
-"""Placeholder; filled in by the phase that owns this service."""
+"""Catalogue API: datasets, publication jobs, versions and rollback."""

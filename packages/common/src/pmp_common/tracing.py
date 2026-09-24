@@ -11,7 +11,7 @@ injected into and extracted from message headers explicitly.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, MutableMapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any
 
@@ -175,13 +175,14 @@ def header_value(
     return None
 
 
-def merge_headers(
-    base: MutableMapping[str, bytes] | None = None, **extra: str | None
-) -> list[tuple[str, bytes]]:
-    """Build a Kafka header list from the current trace context plus extras."""
-    out: dict[str, bytes] = dict(base or {})
-    out.update(dict(kafka_headers_from_carrier()))
-    out.update({k: v.encode() for k, v in extra.items() if v is not None})
+def merge_headers(extra: Mapping[str, str | None] | None = None) -> list[tuple[str, bytes]]:
+    """Kafka headers carrying the current trace context plus correlation extras.
+
+    Header names contain hyphens (``x-request-id``), so extras are passed as a
+    mapping rather than keyword arguments.
+    """
+    out: dict[str, bytes] = dict(kafka_headers_from_carrier())
+    out.update({k: v.encode() for k, v in (extra or {}).items() if v is not None})
     return list(out.items())
 
 

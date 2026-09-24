@@ -226,6 +226,45 @@ services:
       - ./dev-keys:/run/keys:ro
     networks: [pmp]
 
+  backend:
+    build:
+      context: .
+      dockerfile: ops/docker/python.Dockerfile
+      args:
+        PACKAGE: pmp-backend
+        SERVICE_DIR: services/backend
+        MODULE: pmp_backend
+        HEALTH_PORT: "8000"
+        GIT_SHA: ${GIT_SHA:-dev}
+    image: pmp/backend:${GIT_SHA:-dev}
+    <<: *default-restart
+    logging: *default-logging
+    depends_on:
+      postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      s3: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+      kafka-init: {condition: service_completed_successfully}
+      s3-init: {condition: service_completed_successfully}
+    environment:
+      <<: [*common-env, *db-env, *kafka-env, *s3-env]
+      HTTP_PORT: "8000"
+      DB_USER: backend_svc
+      DB_PASSWORD: ${BACKEND_DB_PASSWORD:?}
+      S3_ACCESS_KEY_ID: ${BACKEND_S3_ACCESS_KEY:?}
+      S3_SECRET_ACCESS_KEY: ${BACKEND_S3_SECRET_KEY:?}
+      BACKEND_AUTH_MODE: ${BACKEND_AUTH_MODE:-internal_jwt}
+      BACKEND_DEV_USER_ID: ${BACKEND_DEV_USER_ID:-dev-user}
+      BACKEND_DEV_TENANT_ID: ${BACKEND_DEV_TENANT_ID:-dev-tenant}
+      INTERNAL_JWT_PUBLIC_KEY_PATH: /run/keys/internal-jwt.pub
+      DEMO_UPLOAD_ENABLED: ${DEMO_UPLOAD_ENABLED:-false}
+      CLOUDFRONT_PRIVATE_KEY_PATH: /run/keys/cloudfront.key
+      CLOUDFRONT_KEY_PAIR_ID: ${CLOUDFRONT_KEY_PAIR_ID:-LOCALKEYPAIRID}
+      TILE_COOKIE_TTL_SECONDS: ${TILE_COOKIE_TTL_SECONDS:-600}
+    volumes:
+      - ./dev-keys:/run/keys:ro
+    networks: [pmp]
+
   # =======================================================================
   # Developer UIs
   # =======================================================================

@@ -20,7 +20,7 @@ export GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 # Long-running services `up --wait` waits on. The one-shot init containers are
 # excluded (compose treats any exited container as a failure) and are checked
 # separately by scripts/check-oneshots.sh.
-WAIT_SERVICES := postgres kafka s3 kafka-console auth
+WAIT_SERVICES := postgres kafka s3 kafka-console auth backend
 ONESHOTS := migrate kafka-init s3-init
 export ONESHOTS
 export COMPOSE_CMD := $(COMPOSE)
@@ -92,6 +92,10 @@ lint: ## ruff check + format check + mypy + tsc
 fmt: ## Auto-fix lint and formatting
 	uv run ruff check --fix packages services tests ops scripts
 	uv run ruff format packages services tests ops scripts
+
+.PHONY: event-schemas
+event-schemas: ## Regenerate docs/events/*.schema.json from the Pydantic models
+	uv run python scripts/export-event-schemas.py
 
 .PHONY: test
 test: ## Run the unit tests (no containers required)

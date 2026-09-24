@@ -1,0 +1,118 @@
+{
+  "$defs": {
+    "PublicationResult": {
+      "description": "What a successful publication actually did to the catalogue.",
+      "enum": [
+        "CREATED",
+        "DEDUPLICATED",
+        "POINTER_MOVED"
+      ],
+      "title": "PublicationResult",
+      "type": "string"
+    },
+    "Visibility": {
+      "enum": [
+        "public",
+        "private"
+      ],
+      "title": "Visibility",
+      "type": "string"
+    }
+  },
+  "$id": "https://pmtiles.platform/events/publication.succeeded/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "dataset_id": {
+      "description": "Dataset the event is about; also the partition key.",
+      "format": "uuid",
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "event_id": {
+      "description": "Unique id of this event; consumers deduplicate on it.",
+      "format": "uuid",
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "const": "publication.succeeded",
+      "default": "publication.succeeded",
+      "title": "Event Type",
+      "type": "string"
+    },
+    "job_id": {
+      "description": "Publication job the event belongs to.",
+      "format": "uuid",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "object_key": {
+      "title": "Object Key",
+      "type": "string"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "result": {
+      "$ref": "#/$defs/PublicationResult"
+    },
+    "schema_version": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "title": "Sha256",
+      "type": "string"
+    },
+    "size_bytes": {
+      "minimum": 0,
+      "title": "Size Bytes",
+      "type": "integer"
+    },
+    "status": {
+      "const": "SUCCEEDED",
+      "default": "SUCCEEDED",
+      "title": "Status",
+      "type": "string"
+    },
+    "tenant_id": {
+      "description": "Owning organization id.",
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "version_id": {
+      "format": "uuid",
+      "title": "Version Id",
+      "type": "string"
+    },
+    "version_seq": {
+      "minimum": 1,
+      "title": "Version Seq",
+      "type": "integer"
+    },
+    "visibility": {
+      "$ref": "#/$defs/Visibility"
+    }
+  },
+  "required": [
+    "tenant_id",
+    "dataset_id",
+    "job_id",
+    "result",
+    "version_id",
+    "version_seq",
+    "sha256",
+    "size_bytes",
+    "object_key",
+    "visibility"
+  ],
+  "title": "PublicationSucceeded",
+  "type": "object"
+}
