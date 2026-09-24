@@ -370,6 +370,30 @@ services:
       - ./services/gateway/routes.yaml:/app/routes.yaml:ro
     networks: [pmp]
 
+  edge-verifier:
+    # Local stand-in for CloudFront's signed-cookie check on /tiles/private/*.
+    # Holds only the PUBLIC key. Deleted on AWS, where CloudFront does this.
+    build:
+      context: .
+      dockerfile: ops/docker/python.Dockerfile
+      args:
+        PACKAGE: pmp-edge-verifier
+        SERVICE_DIR: services/edge-verifier
+        MODULE: pmp_edge_verifier
+        HEALTH_PORT: "8000"
+        GIT_SHA: ${GIT_SHA:-dev}
+    image: pmp/edge-verifier:${GIT_SHA:-dev}
+    <<: *default-restart
+    logging: *default-logging
+    environment:
+      <<: *common-env
+      HTTP_PORT: "8000"
+      CLOUDFRONT_PUBLIC_KEY_PATH: /run/keys/cloudfront.pub
+      CLOUDFRONT_KEY_PAIR_ID: ${CLOUDFRONT_KEY_PAIR_ID:-LOCALKEYPAIRID}
+    volumes:
+      - ./dev-keys:/run/keys:ro
+    networks: [pmp]
+
   edge:
     # The only service published on the host. Local stand-in for CloudFront.
     build:
@@ -383,6 +407,7 @@ services:
     depends_on:
       s3: {condition: service_healthy}
       gateway: {condition: service_healthy}
+      edge-verifier: {condition: service_healthy}
     environment:
       # All API traffic goes through the gateway; the backend is not reachable
       # from the edge at all.

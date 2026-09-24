@@ -27,6 +27,7 @@ __all__ = [
     "OptionalIdentity",
     "PlatformAdmin",
     "TenantAdmin",
+    "TenantOrPlatformAdmin",
     "build_identity_resolver",
     "require_identity",
 ]
@@ -124,6 +125,18 @@ def require_tenant_identity(request: Request) -> Identity:
     return identity
 
 
+def require_tenant_or_platform_admin(request: Request) -> Identity:
+    """A tenant member, or a platform administrator who belongs to no tenant.
+
+    For endpoints whose *scope* depends on who is asking — a platform admin is
+    not refused for lacking a tenant, they are given the cross-tenant scope.
+    """
+    identity = require_identity(request)
+    if identity.is_platform_admin:
+        return identity
+    return require_tenant_identity(request)
+
+
 def require_platform_admin(request: Request) -> Identity:
     identity = require_identity(request)
     if not identity.is_platform_admin:
@@ -143,6 +156,7 @@ def require_tenant_admin(request: Request) -> Identity:
 
 
 CurrentIdentity = Annotated[Identity, Depends(require_tenant_identity)]
+TenantOrPlatformAdmin = Annotated[Identity, Depends(require_tenant_or_platform_admin)]
 OptionalIdentity = Annotated[Identity | None, Depends(optional_identity)]
 PlatformAdmin = Annotated[Identity, Depends(require_platform_admin)]
 TenantAdmin = Annotated[Identity, Depends(require_tenant_admin)]

@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlalchemy import text
 
+from pmp_common.cloudfront import CloudFrontSigner
 from pmp_common.db import make_async_engine
 from pmp_common.kafka import AsyncProducer
 from pmp_common.logging import configure_logging, get_logger
@@ -16,7 +17,7 @@ from pmp_common.web import create_app
 
 from .identity import build_identity_resolver
 from .publisher import PublicationPublisher
-from .routers import admin, datasets, demo, publications
+from .routers import admin, datasets, demo, publications, tiles
 from .settings import BackendSettings, get_settings
 from .storage import Storage
 
@@ -52,6 +53,11 @@ def build_app(settings: BackendSettings | None = None) -> FastAPI:
         app.state.engine = make_async_engine(settings.db, application_name="pmp-backend")
         app.state.storage = Storage(settings.s3, public_base_url=settings.public_base_url)
         app.state.identity_resolver = build_identity_resolver(settings)
+        # Only the backend holds the tile-cookie private key; the edge (and on
+        # AWS, CloudFront) has only the public half.
+        app.state.tile_signer = CloudFrontSigner.from_file(
+            settings.cloudfront_private_key_path, key_pair_id=settings.cloudfront_key_pair_id
+        )
 
         producer = AsyncProducer(settings.kafka, client_id=f"backend-{settings.git_sha}")
         producer.start()
@@ -107,7 +113,13 @@ def build_app(settings: BackendSettings | None = None) -> FastAPI:
         ),
     )
 
-    for router in (publications.router, datasets.router, admin.router, demo.router):
+    for router in (
+        publications.router,
+        datasets.router,
+        admin.router,
+        demo.router,
+        tiles.router,
+    ):
         app.include_router(router, prefix=API_PREFIX)
 
     instrument_fastapi(app)

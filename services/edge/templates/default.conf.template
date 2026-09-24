@@ -69,7 +69,10 @@ server {
 
         # The archive at this key can never change, so revalidation is waste.
         include /etc/nginx/conf.d/common-headers.inc;
+        # Replace, don't append: the store sends these too, and a duplicated
+        # `Accept-Ranges: bytes, bytes` is malformed.
         proxy_hide_header Cache-Control;
+        proxy_hide_header Accept-Ranges;
         add_header Cache-Control "public, max-age=31536000, immutable" always;
         add_header Accept-Ranges bytes always;
     }
@@ -88,7 +91,10 @@ server {
         # Long-lived, but never in a shared cache: the cookie, not the URL, is
         # what authorises this response.
         include /etc/nginx/conf.d/common-headers.inc;
+        # Replace, don't append: the store sends these too, and a duplicated
+        # `Accept-Ranges: bytes, bytes` is malformed.
         proxy_hide_header Cache-Control;
+        proxy_hide_header Accept-Ranges;
         add_header Cache-Control "private, max-age=600" always;
         add_header Accept-Ranges bytes always;
     }

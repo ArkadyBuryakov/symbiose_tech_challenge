@@ -396,3 +396,50 @@ explicit choice always.
 pointless friction, and guessing for a multi-tenant user would silently decide
 which tenant's data a request touches. The fallback lives in `verify` rather
 than in a plugin hook so its behaviour is explicit and testable.
+
+---
+
+## Phase 5 — private delivery
+
+### Signed cookies, not signed URLs
+**Decision.** Private archives are authorised by CloudFront-format signed
+cookies issued by `POST /api/v1/tiles/session`.
+**Alternatives.** Signed URLs per archive; proxying private tiles through the
+backend.
+**Why.** A PMTiles archive is read with many range requests to *one* URL. A
+signed URL would put a credential in every request line (and in every log and
+cache key) and would change whenever it was re-signed, defeating caching.
+Proxying through the backend would put the API in the tile hot path. Cookies
+leave the object URL stable and cacheable, and CloudFront validates them
+natively on AWS.
+
+### Tenant-wide cookie scope
+**Decision.** The policy resource is `/tiles/private/{tenant_id}/*`, or
+`/tiles/private/*` for platform administrators.
+**Alternatives.** One cookie per dataset.
+**Why.** Per-dataset scope would be marginally tighter, but a tenant member is
+already entitled to every private dataset of their tenant, so it would add
+re-issuance on every dataset switch without reducing what a leaked cookie
+exposes in practice. Tenant isolation — the property that matters — is exact,
+including the `org_tenant-a` vs `org_tenant-ab` prefix case, which has a test.
+
+### The cookie format is checked against botocore, not against ourselves
+**Decision.** Unit tests assert that our policy JSON is byte-identical to
+`botocore.signers.CloudFrontSigner.build_policy`, and that a cookie signed with
+botocore verifies in the edge verifier.
+**Why.** CloudFront signs the literal policy bytes, so a key-order or
+whitespace difference would pass every self-consistency test and then fail on
+AWS. botocore is AWS's reference implementation, which makes it the right
+oracle.
+
+### The edge verifier holds only the public key
+**Decision.** `edge-verifier` can validate cookies but cannot mint them; only
+the backend has the private key.
+**Why.** It mirrors CloudFront's trusted key group exactly, and it means the
+component that is deleted on AWS never held anything worth stealing.
+
+### `Accept-Ranges` and `Cache-Control` are replaced at the edge, not appended
+**Decision.** `proxy_hide_header` before `add_header` for both.
+**Why.** Found by the e2e suite: MinIO sends `Accept-Ranges` itself, so adding
+ours produced `Accept-Ranges: bytes, bytes` — a malformed header some clients
+reject.

@@ -135,10 +135,10 @@ async function main() {
 
 /** Fetch signed tile cookies now, and keep refreshing them before they expire. */
 async function startTileSession(datasetId) {
-    const session = await api.createTileSession(datasetId);
+    const session = await api.createTileSession();
     const refreshMs = Math.max((session.expires_in ?? 600) * 1000 * 0.6, 30_000);
     return setInterval(() => {
-        api.createTileSession(datasetId).catch((error) =>
+        api.createTileSession().catch((error) =>
             console.error("[tiles] cookie refresh failed", error),
         );
     }, refreshMs);

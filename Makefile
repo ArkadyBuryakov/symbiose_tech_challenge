@@ -20,7 +20,7 @@ export GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 # Long-running services `up --wait` waits on. The one-shot init containers are
 # excluded (compose treats any exited container as a failure) and are checked
 # separately by scripts/check-oneshots.sh.
-WAIT_SERVICES := postgres kafka s3 kafka-console auth gateway backend worker edge
+WAIT_SERVICES := postgres kafka s3 kafka-console auth gateway backend worker edge-verifier edge
 ONESHOTS := migrate migrate-auth kafka-init s3-init
 export ONESHOTS
 export COMPOSE_CMD := $(COMPOSE)

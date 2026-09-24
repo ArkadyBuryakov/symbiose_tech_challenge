@@ -1,1 +1,1 @@
-"""Placeholder; filled in by the phase that owns this service."""
+"""Local stand-in for CloudFront's signed-cookie check (deleted on AWS)."""

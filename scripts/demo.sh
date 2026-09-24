@@ -2,6 +2,8 @@
 # End-to-end demonstration, driven entirely through the public edge.
 #
 #   ./scripts/demo.sh [path/to/file.pmtiles] [dataset-slug]
+#   VISIBILITY=private ./scripts/demo.sh ...     publish a private dataset
+#   DEMO_API_KEY=pmp_... ./scripts/demo.sh ...   authenticate as the producer
 #
 # It does exactly what a real client does:
 #   1. ask the API for a presigned PUT into staging,
@@ -109,10 +111,15 @@ echo "  uploaded"
 SPEC_ARG='null'
 [[ -f "$SPEC_FILE" ]] && SPEC_ARG="$(cat "$SPEC_FILE")"
 
-BODY="$(python3 - "$SLUG" "$SOURCE_KEY" "$SPEC_ARG" <<'PY'
+BODY="$(python3 - "$SLUG" "$SOURCE_KEY" "$SPEC_ARG" "${VISIBILITY:-public}" <<'PY'
 import json, sys
-slug, source_key, spec_raw = sys.argv[1], sys.argv[2], sys.argv[3]
-body = {"dataset_slug": slug, "source_key": source_key, "name": "Forest crowns density"}
+slug, source_key, spec_raw, visibility = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+body = {
+    "dataset_slug": slug,
+    "source_key": source_key,
+    "name": "Forest crowns density",
+    "visibility": visibility,
+}
 if spec_raw != "null":
     body["spec"] = json.loads(spec_raw)
 print(json.dumps(body))
@@ -163,12 +170,18 @@ say "Verifying tile delivery"
 CURRENT="$(api "${API}/datasets/${DATASET_ID}/current")"
 TILE_URL="$(echo "$CURRENT" | json "['url']")"
 
-RANGE_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -r 0-126 "${BASE_URL}${TILE_URL}")"
+# A private archive needs the signed tile cookies first — exactly what the map
+# page does before its first range request.
+if [[ "$(echo "$CURRENT" | json "['visibility']")" == "private" ]]; then
+    api -o /dev/null -X POST "${API}/tiles/session"
+    echo "  obtained signed tile cookies for the private archive"
+fi
+RANGE_STATUS="$(api -o /dev/null -w '%{http_code}' -r 0-126 "${BASE_URL}${TILE_URL}")"
 echo "  GET ${TILE_URL}"
 echo "  Range: bytes=0-126 -> HTTP ${RANGE_STATUS}"
 [[ "$RANGE_STATUS" == "206" ]] || { echo "expected 206 Partial Content" >&2; exit 1; }
 
-curl -sS -r 0-126 "${BASE_URL}${TILE_URL}" | head -c 7 | grep -q PMTiles \
+api -r 0-126 "${BASE_URL}${TILE_URL}" | head -c 7 | grep -q PMTiles \
     && echo "  first 127 bytes are a PMTiles v3 header"
 
 say "Done"

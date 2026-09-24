@@ -71,8 +71,8 @@ export const api = {
         }),
 
     createDemoUpload: (body) => request(`${BASE}/demo/uploads`, { method: "POST", body }),
-    createTileSession: (datasetId) =>
-        request(`${BASE}/tiles/session`, { method: "POST", body: { dataset_id: datasetId } }),
+    // Tenant-wide: the cookie covers every private dataset of the caller's tenant.
+    createTileSession: () => request(`${BASE}/tiles/session`, { method: "POST" }),
 
     // --- auth (BetterAuth, passed through by the gateway untouched) ---
     session: () => request("/api/auth/get-session"),
