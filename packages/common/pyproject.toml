@@ -1,0 +1,39 @@
+[project]
+name = "pmp-common"
+version = "0.1.0"
+description = "Shared library for the PMTiles publishing platform: config, events, logging, metrics, tracing, identity, Kafka, DB and S3 helpers."
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
+    "structlog==26.1.0",
+    "prometheus-client==0.26.0",
+    "pyjwt[crypto]==2.15.0",
+    "cryptography==50.0.1",
+    "opentelemetry-api==1.44.0",
+    "opentelemetry-sdk==1.44.0",
+    "opentelemetry-exporter-otlp-proto-grpc==1.44.0",
+    "opentelemetry-instrumentation-httpx==0.65b0",
+]
+
+[project.optional-dependencies]
+web = [
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.53.0",
+    "opentelemetry-instrumentation-fastapi==0.65b0",
+]
+db = [
+    "sqlalchemy==2.0.54",
+    "psycopg[binary,pool]==3.3.6",
+    "alembic==1.20.0",
+    "opentelemetry-instrumentation-psycopg==0.65b0",
+]
+kafka = ["confluent-kafka==2.15.1"]
+s3 = ["boto3==1.43.101"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pmp_common"]

@@ -1,0 +1,104 @@
+# Root of the uv workspace. This project is not itself a distributable package;
+# it only pins the shared toolchain and the lint/type/test configuration that
+# every workspace member inherits.
+[project]
+name = "pmtiles-platform"
+version = "0.1.0"
+description = "PMTiles publishing platform (workspace root)"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "ruff==0.16.8",
+    "mypy==2.3.1",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "httpx==0.28.1",
+    "types-boto3[s3]==1.43.101",
+]
+
+[tool.uv.workspace]
+members = [
+    "packages/common",
+    "services/backend",
+    "services/gateway",
+    "services/worker",
+    "services/edge-verifier",
+]
+
+[tool.uv.sources]
+pmp-common = { workspace = true }
+
+[tool.uv]
+# Keep the whole workspace resolved against one lock file.
+default-groups = ["dev"]
+
+# ---------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [".venv", "migrations/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "A",         # builtins shadowing
+    "C4",        # comprehensions
+    "DTZ",       # naive datetimes
+    "T20",       # print
+    "SIM",       # simplify
+    "RUF",
+    "ASYNC",
+    "S",         # bandit
+]
+ignore = [
+    "S101",    # assert is fine in tests and internal invariants
+    "B008",    # FastAPI Depends() in defaults is the idiom
+    "N818",    # our exceptions are named after HTTP statuses (NotFound, Conflict, ...)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "T20"]
+"**/tests/**" = ["S", "T20"]
+"scripts/**" = ["T20"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pmp_common", "pmp_backend", "pmp_gateway", "pmp_worker", "pmp_edge_verifier"]
+
+# ---------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+pretty = true
+show_error_codes = true
+plugins = ["pydantic.mypy"]
+exclude = ["migrations/versions/", "\\.venv/"]
+
+[[tool.mypy.overrides]]
+module = ["confluent_kafka.*", "pmtiles.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# The worker is deliberately plain/synchronous; strictness is relaxed only for
+# third-party stubs it cannot control.
+module = "tests.*"
+disallow_untyped_defs = false
+
+# ---------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["packages", "services", "tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "e2e: end-to-end tests that require the docker compose stack to be running",
+]
+filterwarnings = ["error::DeprecationWarning:pmp_.*"]

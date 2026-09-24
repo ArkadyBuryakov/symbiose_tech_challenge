@@ -1,0 +1,17 @@
+# Keep build contexts small and free of anything secret.
+.git
+.venv
+**/.venv
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+dev-keys/
+.env
+.env.*
+!.env.example
+sample-data/
+challenge_input/
+*.md
+.local/

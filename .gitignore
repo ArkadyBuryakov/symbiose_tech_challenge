@@ -1,1 +1,38 @@
+# --- local sample data (large binaries are not committed) ---
 challenge_input/
+sample-data/*.pmtiles
+sample-data/*.geojson
+sample-data/*.mbtiles
+
+# --- secrets / local config ---
+.env
+.env.local
+dev-keys/
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+.coverage
+htmlcov/
+
+# --- node ---
+node_modules/
+services/auth/dist/
+*.tsbuildinfo
+
+# --- editors / os ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# --- local runtime artifacts ---
+.local/

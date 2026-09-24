@@ -1,0 +1,488 @@
+{
+  "id": "crowns_density",
+  "name": "Forest crowns density in h3 format",
+  "available": true,
+  "path": "input_h3_multires.pmtiles",
+  "format": "pmtiles",
+  "style": {
+    "color_field": "count",
+    "field_type": "integer",
+    "min": 0,
+    "max": 728,
+    "columns": [
+      {
+        "field": "h3_index",
+        "label": "H3 index",
+        "type": "string"
+      },
+      {
+        "field": "h3_resolution",
+        "label": "H3 resolution",
+        "type": "integer"
+      },
+      {
+        "field": "count",
+        "label": "Crown count",
+        "type": "integer"
+      },
+      {
+        "field": "hex_area_ha",
+        "label": "Hex area (ha)",
+        "type": "float"
+      },
+      {
+        "field": "trees_ha",
+        "label": "Trees per hectare",
+        "type": "float"
+      },
+      {
+        "field": "h_mean_m",
+        "label": "Mean height (m)",
+        "type": "float"
+      },
+      {
+        "field": "height_class",
+        "label": "Dominant height class",
+        "type": "string"
+      },
+      {
+        "field": "D_mean_m",
+        "label": "Mean diameter (m)",
+        "type": "float"
+      },
+      {
+        "field": "dbh_class",
+        "label": "DBH class by basal area share",
+        "type": "string"
+      },
+      {
+        "field": "GSV_m3_ha",
+        "label": "Growing stock volume (m3/ha)",
+        "type": "float"
+      },
+      {
+        "field": "volume_class",
+        "label": "Standing volume class",
+        "type": "string"
+      },
+      {
+        "field": "s_area_m2_ha",
+        "label": "Basal area (m2/ha)",
+        "type": "float"
+      },
+      {
+        "field": "basal_area_class",
+        "label": "Basal area class",
+        "type": "string"
+      },
+      {
+        "field": "WDbw_mean_kg_m3",
+        "label": "Mean wood density (kg/m3)",
+        "type": "float"
+      },
+      {
+        "field": "QP_majority",
+        "label": "Majority quality class",
+        "type": "integer"
+      }
+    ]
+  },
+  "layers": [
+    {
+      "layer": "h3_r10",
+      "minzoom": 0,
+      "maxzoom": 15,
+      "geometry": "polygon"
+    },
+    {
+      "layer": "h3_r11",
+      "minzoom": 16,
+      "maxzoom": 16,
+      "geometry": "polygon"
+    },
+    {
+      "layer": "h3_r12",
+      "minzoom": 17,
+      "maxzoom": 18,
+      "geometry": "polygon"
+    },
+    {
+      "layer": "centroids",
+      "minzoom": 19,
+      "maxzoom": 22,
+      "geometry": "point",
+      "columns": [
+        {
+          "field": "id",
+          "label": "Tree id",
+          "type": "integer"
+        },
+        {
+          "field": "x",
+          "label": "Centroid X (EPSG:2154)",
+          "type": "float"
+        },
+        {
+          "field": "y",
+          "label": "Centroid Y (EPSG:2154)",
+          "type": "float"
+        },
+        {
+          "field": "h",
+          "label": "Height (m)",
+          "type": "float"
+        },
+        {
+          "field": "height_class",
+          "label": "Height class",
+          "type": "string"
+        },
+        {
+          "field": "D",
+          "label": "Diameter (m)",
+          "type": "float"
+        },
+        {
+          "field": "dbh_class",
+          "label": "DBH class",
+          "type": "string"
+        },
+        {
+          "field": "GSV",
+          "label": "Growing stock volume (m3)",
+          "type": "float"
+        },
+        {
+          "field": "volume_class",
+          "label": "Standing volume class",
+          "type": "string"
+        },
+        {
+          "field": "s_area",
+          "label": "Basal area (m2)",
+          "type": "float"
+        },
+        {
+          "field": "basal_area_class",
+          "label": "Basal area class",
+          "type": "string"
+        },
+        {
+          "field": "WDbw",
+          "label": "Wood density (kg/m3)",
+          "type": "float"
+        },
+        {
+          "field": "QP",
+          "label": "Quality class",
+          "type": "integer"
+        }
+      ]
+    }
+  ],
+  "field_ranges_by_resolution": {
+    "10": {
+      "D_mean_m": {
+        "type": "float",
+        "min": 0.079,
+        "max": 0.362
+      },
+      "GSV_m3_ha": {
+        "type": "float",
+        "min": 0.020138,
+        "max": 391.661143
+      },
+      "QP_majority": {
+        "type": "integer",
+        "min": 1,
+        "max": 3
+      },
+      "WDbw_mean_kg_m3": {
+        "type": "float",
+        "min": 428.0,
+        "max": 687.677
+      },
+      "basal_area_class": {
+        "type": "string",
+        "min": "assez riche - 17 a 22",
+        "max": "tres riche - > 30"
+      },
+      "count": {
+        "type": "integer",
+        "min": 1,
+        "max": 728
+      },
+      "dbh_class": {
+        "type": "string",
+        "min": "bois moyens - 27.5 a 47.5 cm",
+        "max": "tres petits bois - < 17.5 cm"
+      },
+      "h3_index": {
+        "type": "string",
+        "min": "8a186c96c86ffff",
+        "max": "8a1fb2d32db7fff"
+      },
+      "h3_resolution": {
+        "type": "integer",
+        "min": 10,
+        "max": 10
+      },
+      "h_mean_m": {
+        "type": "float",
+        "min": 5.31,
+        "max": 20.104
+      },
+      "height_class": {
+        "type": "string",
+        "min": "bas - 8 a 17 m",
+        "max": "tres bas - < 8 m"
+      },
+      "hex_area_ha": {
+        "type": "float",
+        "min": 1.373111,
+        "max": 1.373506
+      },
+      "s_area_m2_ha": {
+        "type": "float",
+        "min": 0.003611,
+        "max": 30.827024
+      },
+      "trees_ha": {
+        "type": "float",
+        "min": 0.728082,
+        "max": 530.137564
+      },
+      "volume_class": {
+        "type": "string",
+        "min": "eleve - 250 a 350",
+        "max": "tres faible - < 75"
+      }
+    },
+    "11": {
+      "D_mean_m": {
+        "type": "float",
+        "min": 0.076,
+        "max": 0.443
+      },
+      "GSV_m3_ha": {
+        "type": "float",
+        "min": 0.116865,
+        "max": 589.851455
+      },
+      "QP_majority": {
+        "type": "integer",
+        "min": 1,
+        "max": 3
+      },
+      "WDbw_mean_kg_m3": {
+        "type": "float",
+        "min": 414.4,
+        "max": 741.0
+      },
+      "basal_area_class": {
+        "type": "string",
+        "min": "assez riche - 17 a 22",
+        "max": "tres riche - > 30"
+      },
+      "count": {
+        "type": "integer",
+        "min": 1,
+        "max": 148
+      },
+      "dbh_class": {
+        "type": "string",
+        "min": "bois moyens - 27.5 a 47.5 cm",
+        "max": "tres petits bois - < 17.5 cm"
+      },
+      "h3_index": {
+        "type": "string",
+        "min": "8b186c96c949fff",
+        "max": "8b1fb2d32db5fff"
+      },
+      "h3_resolution": {
+        "type": "integer",
+        "min": 11,
+        "max": 11
+      },
+      "h_mean_m": {
+        "type": "float",
+        "min": 5.423,
+        "max": 23.41
+      },
+      "height_class": {
+        "type": "string",
+        "min": "bas - 8 a 17 m",
+        "max": "tres bon - 28 a 36 m"
+      },
+      "hex_area_ha": {
+        "type": "float",
+        "min": 0.196157,
+        "max": 0.196215
+      },
+      "s_area_m2_ha": {
+        "type": "float",
+        "min": 0.023137,
+        "max": 38.233207
+      },
+      "trees_ha": {
+        "type": "float",
+        "min": 5.096589,
+        "max": 754.43884
+      },
+      "volume_class": {
+        "type": "string",
+        "min": "eleve - 250 a 350",
+        "max": "tres faible - < 75"
+      }
+    },
+    "12": {
+      "D_mean_m": {
+        "type": "float",
+        "min": 0.075,
+        "max": 0.558
+      },
+      "GSV_m3_ha": {
+        "type": "float",
+        "min": 0.751434,
+        "max": 1026.278578
+      },
+      "QP_majority": {
+        "type": "integer",
+        "min": 1,
+        "max": 3
+      },
+      "WDbw_mean_kg_m3": {
+        "type": "float",
+        "min": 397.5,
+        "max": 741.0
+      },
+      "basal_area_class": {
+        "type": "string",
+        "min": "assez riche - 17 a 22",
+        "max": "tres riche - > 30"
+      },
+      "count": {
+        "type": "integer",
+        "min": 1,
+        "max": 32
+      },
+      "dbh_class": {
+        "type": "string",
+        "min": "bois moyens - 27.5 a 47.5 cm",
+        "max": "tres petits bois - < 17.5 cm"
+      },
+      "h3_index": {
+        "type": "string",
+        "min": "8c186c96c949bff",
+        "max": "8c1fb2d32db5dff"
+      },
+      "h3_resolution": {
+        "type": "integer",
+        "min": 12,
+        "max": 12
+      },
+      "h_mean_m": {
+        "type": "float",
+        "min": 4.189,
+        "max": 27.834
+      },
+      "height_class": {
+        "type": "string",
+        "min": "bas - 8 a 17 m",
+        "max": "tres bon - 28 a 36 m"
+      },
+      "hex_area_ha": {
+        "type": "float",
+        "min": 0.028022,
+        "max": 0.028031
+      },
+      "s_area_m2_ha": {
+        "type": "float",
+        "min": 0.157652,
+        "max": 67.4938
+      },
+      "trees_ha": {
+        "type": "float",
+        "min": 35.675578,
+        "max": 1141.831791
+      },
+      "volume_class": {
+        "type": "string",
+        "min": "eleve - 250 a 350",
+        "max": "tres faible - < 75"
+      }
+    }
+  },
+  "field_ranges_by_layer": {
+    "centroids": {
+      "D": {
+        "type": "float",
+        "min": 0.075,
+        "max": 0.59
+      },
+      "GSV": {
+        "type": "float",
+        "min": 0.021061,
+        "max": 4.281211
+      },
+      "QP": {
+        "type": "integer",
+        "min": 1,
+        "max": 3
+      },
+      "WDbw": {
+        "type": "float",
+        "min": 371.0,
+        "max": 741.0
+      },
+      "basal_area_class": {
+        "type": "string",
+        "min": "tres pauvre - < 7",
+        "max": "tres pauvre - < 7"
+      },
+      "dbh_class": {
+        "type": "string",
+        "min": "bois moyens - 27.5 a 47.5 cm",
+        "max": "tres petits bois - < 17.5 cm"
+      },
+      "h": {
+        "type": "float",
+        "min": 4.11,
+        "max": 31.199
+      },
+      "height_class": {
+        "type": "string",
+        "min": "bas - 8 a 17 m",
+        "max": "tres bon - 28 a 36 m"
+      },
+      "id": {
+        "type": "integer",
+        "min": 1,
+        "max": 18139
+      },
+      "s_area": {
+        "type": "float",
+        "min": 0.004419,
+        "max": 0.273731
+      },
+      "volume_class": {
+        "type": "string",
+        "min": "tres faible - < 75",
+        "max": "tres faible - < 75"
+      },
+      "x": {
+        "type": "float",
+        "min": 592370.9375,
+        "max": 593662.75
+      },
+      "y": {
+        "type": "float",
+        "min": 6722843.0,
+        "max": 6723751.5
+      }
+    }
+  },
+  "responsible": "ANDREI",
+  "description": "Forest crowns density in h3 format for resolutions 10-12, with source tree centroids shown at higher zoom levels.",
+  "status": "ready"
+}

@@ -1,0 +1,36 @@
+{
+  "name": "pmp-auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Identity service: users, sessions, organizations (tenants), roles and API keys, built on BetterAuth.",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc --build",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "migrate": "tsx src/migrate.ts",
+    "seed": "tsx src/seed.ts"
+  },
+  "dependencies": {
+    "@better-auth/api-key": "1.7.5",
+    "@hono/node-server": "2.1.1",
+    "better-auth": "1.7.5",
+    "hono": "4.13.9",
+    "pg": "8.23.0",
+    "pino": "10.3.1",
+    "prom-client": "15.1.3",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@better-auth/cli": "1.4.21",
+    "@types/node": "26.6.2",
+    "@types/pg": "8.23.1",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vitest": "5.0.1"
+  }
+}

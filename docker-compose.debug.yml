@@ -1,0 +1,16 @@
+# Direct host access to internals. Merged in by `make up PROFILE=debug`
+# (or `docker compose -f docker-compose.yml -f docker-compose.debug.yml up`).
+#
+# These ports are deliberately NOT in docker-compose.yml: in the normal stack,
+# as on AWS, the edge is the only way in.
+services:
+  postgres:
+    ports: ["127.0.0.1:5432:5432"]
+  kafka:
+    ports: ["127.0.0.1:9092:9092"]
+  s3:
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9011}:9001"
+    environment:
+      MINIO_BROWSER_REDIRECT: "on"
