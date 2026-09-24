@@ -90,6 +90,24 @@ psql: ## Open a psql shell on the catalogue
 		postgres psql -U postgres -d pmtiles
 
 # ---------------------------------------------------------------- demo
+AUTH_CLI := $(COMPOSE) run --rm --no-deps -T auth node dist/users-cli.js
+
+.PHONY: add-tenant
+add-tenant: ## Create a tenant: make add-tenant slug=acme name="Acme Corp"
+	@test -n "$(slug)" || (echo 'usage: make add-tenant slug=acme [name="Acme Corp"]' && exit 1)
+	@$(AUTH_CLI) add-tenant "$(slug)" "$(name)"
+
+.PHONY: add-user
+add-user: ## Create a user: make add-user email=a@b.c password=... tenant=tenant-a role=member
+	@test -n "$(email)" -a -n "$(password)" || (echo 'usage: make add-user email=... password=... [tenant=slug] [role=owner|admin|member] [name="..."] [admin=1]' && exit 1)
+	@$(AUTH_CLI) add-user "$(email)" "$(password)" \
+		$(if $(tenant),--tenant "$(tenant)") $(if $(role),--role "$(role)") \
+		$(if $(name),--name "$(name)") $(if $(admin),--platform-admin)
+
+.PHONY: list-users
+list-users: ## List users with their tenants and roles
+	@$(AUTH_CLI) list
+
 .PHONY: seed-rotate
 seed-rotate: ## Re-seed and mint a fresh producer API key
 	$(MAKE) seed rotate=1

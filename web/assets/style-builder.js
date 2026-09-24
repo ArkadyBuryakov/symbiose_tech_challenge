@@ -21,6 +21,9 @@
 /** Sequential green ramp — forest data, dark = dense. Colour-blind safe. */
 const RAMP = ["#f2f7f2", "#cde5d3", "#9ccfaf", "#65b58b", "#33986a", "#0f7749", "#08552f"];
 
+/** Solid colour for layers that do not carry the colour field. */
+const POINT_COLOR = "#f0b429";
+
 const SOURCE_ID = "pmtiles-source";
 
 /** Pull the H3 resolution out of a layer name like `h3_r11`. */
@@ -96,7 +99,9 @@ export function buildLayers(spec, { vectorLayers = [], headerMaxZoom = 22 } = {}
 function layersFor(entry, spec, field, vectorLayers) {
     const name = entry.layer;
     const geometry = entry.geometry ?? guessGeometry(name, vectorLayers);
-    const color = field ? colorExpression(field, rangeFor(spec, name)) : RAMP[3];
+    const color = hasField(entry, field)
+        ? colorExpression(field, rangeFor(spec, name))
+        : POINT_COLOR;
 
     const common = {
         source: SOURCE_ID,
@@ -150,6 +155,18 @@ function layersFor(entry, spec, field, vectorLayers) {
     ];
 }
 
+/**
+ * Whether a layer carries the colour field. A layer that declares its own
+ * `columns` without it (the reference spec's `centroids` has no `count`) is
+ * drawn in a solid colour instead: interpolating a missing property would
+ * paint every feature the palest ramp colour, invisible against the base.
+ */
+function hasField(entry, field) {
+    if (!field) return false;
+    if (!Array.isArray(entry.columns)) return true;
+    return entry.columns.some((c) => c.field === field);
+}
+
 function guessGeometry(name, vectorLayers) {
     const declared = vectorLayers.find((vl) => vl.id === name);
     if (declared?.geometry) return declared.geometry.toLowerCase();
@@ -168,4 +185,4 @@ export function interactiveLayerIds(layers) {
     return layers.filter((l) => l.type !== "line").map((l) => l.id);
 }
 
-export { RAMP, SOURCE_ID };
+export { POINT_COLOR, RAMP, SOURCE_ID };

@@ -83,6 +83,24 @@ Then open **http://localhost:8080** and sign in:
 
 These are local-only demo accounts, not secrets.
 
+The sign-in form is at the top of the datasets page while you are signed out.
+
+### Adding tenants and users
+
+```bash
+make add-tenant slug=acme name="Acme Corp"
+make add-user email=carol@acme.test password=carol-password-1 tenant=acme role=owner
+make add-user email=ops@example.test password=ops-password-1 admin=1   # platform admin
+make list-users
+```
+
+`role` is `owner`, `admin` or `member` (default `member`); passwords need 10+
+characters. A user added without `tenant=` can sign in and see public datasets
+but cannot publish until added to a tenant. Re-running `add-user` for an
+existing email keeps their password and only adds the membership or role.
+There is deliberately no public self-sign-up: tenants are provisioned by an
+operator.
+
 ### Sample data
 
 `sample-data/input_forest_crowns_pmtiles.spec.json` is committed; the archive

@@ -21,8 +21,11 @@ Pipeline, in order:
 from __future__ import annotations
 
 import time
+import urllib.request
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from http.cookiejar import Cookie, CookieJar, DefaultCookiePolicy
+from typing import Any
 
 import httpx
 from fastapi import FastAPI, Request, Response
@@ -72,6 +75,29 @@ SPOOFABLE_HEADERS = frozenset(
         "x-gateway-identity",
     }
 )
+
+
+class _RejectAllCookies(DefaultCookiePolicy):
+    """A cookie policy that never stores anything."""
+
+    def set_ok(self, cookie: Cookie, request: urllib.request.Request) -> bool:
+        return False
+
+    def return_ok(self, cookie: Cookie, request: urllib.request.Request) -> bool:
+        return False
+
+
+def make_upstream_client(**kwargs: Any) -> httpx.AsyncClient:
+    """The shared upstream client, with cookie persistence disabled.
+
+    An ``httpx.AsyncClient`` keeps a cookie jar by default: every ``Set-Cookie``
+    that passes through it is stored and then *sent on every later request*.
+    In a proxy shared by all callers that turns one user's sign-in into every
+    user's session. Cookies must only ever travel as the caller's own
+    ``Cookie`` header, forwarded verbatim, so the jar is made unable to hold
+    anything.
+    """
+    return httpx.AsyncClient(cookies=CookieJar(policy=_RejectAllCookies()), **kwargs)
 
 
 class StripIdentityHeadersMiddleware(BaseHTTPMiddleware):
@@ -132,7 +158,7 @@ def build_app(settings: GatewaySettings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # One pooled client for every upstream: connection reuse is most of the
         # gateway's latency budget.
-        client = httpx.AsyncClient(
+        client = make_upstream_client(
             timeout=httpx.Timeout(
                 connect=settings.connect_timeout_seconds,
                 read=settings.read_timeout_seconds,

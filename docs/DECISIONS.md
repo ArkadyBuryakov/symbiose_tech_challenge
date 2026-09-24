@@ -534,3 +534,38 @@ tag was being recomputed from `git rev-parse HEAD`, which named an image that
 had never been built. A chaos run should exercise the code under test, not
 silently rebuild it — and recreating the worker without its OTLP endpoint would
 have switched tracing off under the observability profile.
+
+---
+
+## Post-delivery fixes
+
+### The gateway's upstream client must not keep cookies (security)
+**Decision.** The shared `httpx.AsyncClient` is built with a cookie jar whose
+policy refuses to store anything (`make_upstream_client`).
+**What went wrong.** httpx clients keep a cookie jar by default. Every
+`Set-Cookie` passing through the gateway was stored and then attached to *every
+later request from every caller*, so after one sign-in, anonymous visitors were
+served as that user. The unit tests used a fresh client per test and the e2e
+suite never checked an anonymous session after a sign-in, so it went unnoticed
+until the datasets page showed a stranger signed in. Both gaps now have tests;
+the unit test was confirmed to fail against a default client.
+**Why this shape.** Cookies must only ever travel as the caller's own `Cookie`
+header, forwarded verbatim. Refusing storage at the jar is a structural fix: no
+code path can reintroduce shared state by accident.
+
+### Map layout and deep zoom
+**Decision.** Map-page `main` resets the shared `margin: 0 auto`; map max zoom
+is capped at the archive's `max_zoom`; layers whose own `columns` lack the colour
+field are drawn in a solid colour; popups scroll inside their own element.
+**Why.** Auto margins in a flex column disable stretching, which collapsed the
+map to zero width. Zooming past the spec's last zoom window showed an empty map.
+The `centroids` layer has no `count`, so interpolating it painted every point
+the palest colour. These were found by rendering the page in headless Chromium,
+which should have happened before the first delivery.
+
+### Operator CLI for tenants and users
+**Decision.** `make add-tenant`, `make add-user`, `make list-users`, backed by
+`services/auth/src/users-cli.ts`; no public sign-up endpoint in the UI.
+**Why.** Tenants are provisioned, not self-served, on this platform; the CLI
+reuses BetterAuth for password hashing and writes memberships exactly as the
+seed does.

@@ -215,3 +215,48 @@ async def test_upstream_connection_error_becomes_502() -> None:
 
     with pytest.raises(BadGateway):
         await call(make_app(upstream_client(handler)))
+
+
+# --------------------------------------------------------------------------
+# The shared upstream client must never remember cookies
+# --------------------------------------------------------------------------
+async def test_a_cookie_set_for_one_caller_is_never_sent_for_another() -> None:
+    """Regression: httpx clients keep a cookie jar by default. In a proxy shared
+    by every caller, that stored Alice's sign-in cookie and attached it to every
+    subsequent request — anonymous callers came back signed in as Alice."""
+    from pmp_gateway.app import make_upstream_client
+
+    seen: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("cookie"))
+        return reply(200, headers=[("set-cookie", "better-auth.session_token=ALICE; Path=/")])
+
+    client = make_upstream_client(transport=httpx.MockTransport(handler))
+    app = make_app(client, internal_token=None)
+
+    await call(app, headers={"cookie": "better-auth.session_token=ALICE"})  # Alice signs in
+    await call(app)  # an anonymous caller
+    await call(app, headers={"cookie": "better-auth.session_token=BOB"})  # Bob
+
+    assert seen[0] == "better-auth.session_token=ALICE"
+    assert seen[1] is None, "an anonymous request carried a cookie it never sent"
+    assert seen[2] == "better-auth.session_token=BOB"
+    assert len(client.cookies.jar) == 0
+
+
+async def test_a_default_httpx_client_would_leak_which_is_why_the_factory_exists() -> None:
+    """Documents the failure mode the factory prevents."""
+
+    seen: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("cookie"))
+        return reply(200, headers=[("set-cookie", "session=ALICE; Path=/")])
+
+    leaky = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = make_app(leaky, internal_token=None)
+    await call(app)
+    await call(app)
+
+    assert seen[1] == "session=ALICE"

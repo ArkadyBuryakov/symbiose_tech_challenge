@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import {
+    POINT_COLOR,
     RAMP,
     buildLayers,
     colorExpression,
@@ -186,4 +187,18 @@ test("outline layers are not clickable", () => {
     assert.ok(interactive.includes("h3_r10-fill"));
     assert.ok(interactive.includes("centroids-circle"));
     assert.ok(!interactive.some((id) => id.endsWith("-line")));
+});
+
+test("a layer whose own columns lack the colour field gets a solid colour", () => {
+    // The reference spec's `centroids` declares columns without `count`;
+    // interpolating it would paint every tree the palest ramp colour.
+    const circle = buildLayers(realSpec).find((l) => l.id === "centroids-circle");
+
+    assert.equal(circle.paint["circle-color"], POINT_COLOR);
+});
+
+test("layers without their own columns are still coloured by the field", () => {
+    const fill = buildLayers(realSpec).find((l) => l.id === "h3_r10-fill");
+
+    assert.equal(fill.paint["fill-color"][0], "interpolate");
 });

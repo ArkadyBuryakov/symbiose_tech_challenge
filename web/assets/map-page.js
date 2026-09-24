@@ -104,7 +104,9 @@ async function main() {
         // The header's own bounds are authoritative — no guessing, no extra request.
         bounds: current.pmtiles_header?.bounds,
         fitBoundsOptions: { padding: 40 },
-        maxZoom: (current.pmtiles_header?.max_zoom ?? 22) + 1,
+        // Capped at the archive's own max zoom: the spec's zoom windows end
+        // there, so zooming further would show an empty map.
+        maxZoom: current.pmtiles_header?.max_zoom ?? 22,
         attributionControl: { compact: true },
     });
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
@@ -247,6 +249,7 @@ function wirePopups(map, spec, layerIds) {
         }
 
         const content = document.createElement("div");
+        content.className = "popup-body";
         const title = document.createElement("div");
         title.className = "popup-title";
         title.textContent = sourceLayer;

@@ -221,3 +221,25 @@ def test_11b_all_three_cloudfront_cookies_survive_the_gateway(alice: Session) ->
     for value in response.headers.get_list("set-cookie"):
         assert "HttpOnly" in value
         assert "Path=/tiles/private/" in value
+
+
+# --------------------------------------------------------------------------
+# 12. One caller's session never leaks to another
+# --------------------------------------------------------------------------
+def test_12_a_sign_in_does_not_leak_to_other_callers(alice: Session) -> None:
+    """Regression: the gateway's shared HTTP client stored Set-Cookie headers in
+    its cookie jar and attached them to every later request, so anonymous
+    callers came back signed in as whoever signed in last."""
+    fresh = sign_in(*USERS["bob"])  # a sign-in passes through the gateway now
+    fresh.close()
+
+    anonymous = httpx.get(f"{BASE_URL}/api/auth/get-session", headers={"Origin": BASE_URL})
+    assert anonymous.status_code == 200
+    assert anonymous.json() is None, f"anonymous caller got a session: {anonymous.text[:200]}"
+
+    # Nor may an anonymous caller reach authenticated API routes.
+    assert httpx.get(f"{API}/publications").status_code == 401
+
+    # And a signed-in caller still sees only themselves.
+    me = alice.get("/api/auth/get-session").json()
+    assert me["user"]["email"] == USERS["alice"][0]
