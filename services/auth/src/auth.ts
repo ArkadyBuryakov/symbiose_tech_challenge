@@ -49,11 +49,13 @@ export function createAuth(config: Config, pool: Pool) {
     },
 
     advanced: {
-      // The gateway is the only thing that talks to this service, and it sets
-      // X-Forwarded-For. Without this, BetterAuth's own rate limiting cannot
-      // tell callers apart and falls back to one shared bucket per path.
       ipAddress: {
-        ipAddressHeaders: ["x-forwarded-for", "x-real-ip"],
+        // `x-real-ip` is overwritten by the edge with the TCP peer it saw, and
+        // only the edge can reach the gateway, so it is trustworthy and
+        // single-valued. `x-forwarded-for` is neither: the client controls its
+        // first entry. Without this BetterAuth cannot tell callers apart and
+        // rate-limits sign-in with one bucket shared by everyone.
+        ipAddressHeaders: ["x-real-ip"],
       },
       // Plain HTTP locally; on AWS everything is behind TLS and this
       // becomes true via the environment.

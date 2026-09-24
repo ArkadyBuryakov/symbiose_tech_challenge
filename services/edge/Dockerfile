@@ -8,7 +8,8 @@
 #
 # Build context is the repository root: the image bundles `web/`.
 
-FROM nginx:1.29-alpine AS runtime
+# The `-otel` variant ships the official ngx_otel_module; nothing else differs.
+FROM nginx:1.29-alpine-otel AS runtime
 
 ARG GIT_SHA=unknown
 LABEL org.opencontainers.image.revision="${GIT_SHA}"

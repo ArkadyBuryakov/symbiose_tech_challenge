@@ -1,0 +1,11 @@
+# Tracing at the edge (rendered by the nginx entrypoint's envsubst).
+#
+# `EDGE_OTEL_TRACE` is `off` by default and `on` under the observability
+# profile. Even when off, an incoming W3C `traceparent` is propagated
+# upstream, so a trace started by a client is never broken here.
+otel_exporter {
+    endpoint ${EDGE_OTEL_ENDPOINT};
+}
+otel_service_name edge;
+otel_trace ${EDGE_OTEL_TRACE};
+otel_trace_context propagate;

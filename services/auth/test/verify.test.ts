@@ -25,6 +25,7 @@ const ORIGIN = "http://localhost:8080";
 let config: Config;
 let pool: Pool;
 let app: Hono;
+let auth: ReturnType<typeof createAuth>;
 let available = false;
 
 const users = {
@@ -56,7 +57,7 @@ beforeAll(async () => {
     });
     await pool.query('SELECT 1 FROM "user" LIMIT 1');
 
-    const auth = createAuth(config, pool);
+    auth = createAuth(config, pool);
     app = new Hono();
     app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
     registerVerifyRoute(app, auth, pool);
@@ -94,22 +95,22 @@ async function verify(headers: Record<string, string>) {
 }
 
 describe.runIf(process.env.SKIP_DB_TESTS !== "1")("/internal/verify", () => {
-  it("rejects a request with no credential at all", async () => {
-    if (!available) return;
+  it("rejects a request with no credential at all", async (ctx) => {
+    if (!available) return ctx.skip();
     const response = await verify({});
 
     expect(response.status).toBe(401);
   });
 
-  it("rejects a garbage cookie", async () => {
-    if (!available) return;
+  it("rejects a garbage cookie", async (ctx) => {
+    if (!available) return ctx.skip();
     const response = await verify({ cookie: "better-auth.session_token=not-a-real-token" });
 
     expect(response.status).toBe(401);
   });
 
-  it("resolves a signed-in user's tenant and role", async () => {
-    if (!available) return;
+  it("resolves a signed-in user's tenant and role", async (ctx) => {
+    if (!available) return ctx.skip();
     const cookie = await signIn(users.alice.email, users.alice.password);
 
     const response = await verify({ cookie });
@@ -124,8 +125,8 @@ describe.runIf(process.env.SKIP_DB_TESTS !== "1")("/internal/verify", () => {
     expect(new Date(body.session_expires_at).getTime()).toBeGreaterThan(Date.now());
   });
 
-  it("reports a member as a member, not as an owner", async () => {
-    if (!available) return;
+  it("reports a member as a member, not as an owner", async (ctx) => {
+    if (!available) return ctx.skip();
     const cookie = await signIn(users.bob.email, users.bob.password);
 
     const body = await (await verify({ cookie })).json();
@@ -134,8 +135,8 @@ describe.runIf(process.env.SKIP_DB_TESTS !== "1")("/internal/verify", () => {
     expect(body.tenant_role).toBe("member");
   });
 
-  it("reports the platform administrator role", async () => {
-    if (!available) return;
+  it("reports the platform administrator role", async (ctx) => {
+    if (!available) return ctx.skip();
     const cookie = await signIn(users.admin.email, users.admin.password);
 
     const body = await (await verify({ cookie })).json();
@@ -146,8 +147,8 @@ describe.runIf(process.env.SKIP_DB_TESTS !== "1")("/internal/verify", () => {
     expect(body.tenant_role).toBeNull();
   });
 
-  it("stops accepting a session as soon as it is revoked", async () => {
-    if (!available) return;
+  it("stops accepting a session as soon as it is revoked", async (ctx) => {
+    if (!available) return ctx.skip();
     const cookie = await signIn(users.alice.email, users.alice.password);
     expect((await verify({ cookie })).status).toBe(200);
 
@@ -159,15 +160,66 @@ describe.runIf(process.env.SKIP_DB_TESTS !== "1")("/internal/verify", () => {
     expect((await verify({ cookie })).status).toBe(401);
   });
 
-  it("rejects an API key that does not exist", async () => {
-    if (!available) return;
+  it("resolves an API key to its owner and the tenant bound in its metadata", async (ctx) => {
+    if (!available) return ctx.skip();
+    const owner = await pool.query<{ id: string }>(
+      `SELECT id FROM "user" WHERE email = 'producer@tenant-a.test'`,
+    );
+    const userId = owner.rows[0]?.id;
+    expect(userId, "run make seed first").toBeTruthy();
+
+    const created = await auth.api.createApiKey({
+      body: {
+        userId: userId!,
+        name: `vitest-${Date.now()}`,
+        metadata: { tenant_id: "org_tenant-a" },
+      },
+    });
+
+    try {
+      const body = await (await verify({ "x-api-key": created.key })).json();
+
+      expect(body.user_id).toBe(userId);
+      expect(body.tenant_id).toBe("org_tenant-a");
+      expect(body.tenant_role).toBe("member");
+      expect(body.auth_method).toBe("api_key");
+      expect(body.session_expires_at).toBeNull();
+    } finally {
+      await pool.query(`DELETE FROM "apikey" WHERE id = $1`, [created.id]);
+    }
+  });
+
+  it("stops accepting an API key once it is disabled", async (ctx) => {
+    if (!available) return ctx.skip();
+    const owner = await pool.query<{ id: string }>(
+      `SELECT id FROM "user" WHERE email = 'producer@tenant-a.test'`,
+    );
+    const created = await auth.api.createApiKey({
+      body: {
+        userId: owner.rows[0]!.id,
+        name: `vitest-disabled-${Date.now()}`,
+        metadata: { tenant_id: "org_tenant-a" },
+      },
+    });
+
+    try {
+      expect((await verify({ "x-api-key": created.key })).status).toBe(200);
+      await pool.query(`UPDATE "apikey" SET enabled = false WHERE id = $1`, [created.id]);
+      expect((await verify({ "x-api-key": created.key })).status).toBe(401);
+    } finally {
+      await pool.query(`DELETE FROM "apikey" WHERE id = $1`, [created.id]);
+    }
+  });
+
+  it("rejects an API key that does not exist", async (ctx) => {
+    if (!available) return ctx.skip();
     const response = await verify({ "x-api-key": "pmp_definitely_not_a_key" });
 
     expect(response.status).toBe(401);
   });
 
-  it("prefers the API key over a session cookie when both are present", async () => {
-    if (!available) return;
+  it("prefers the API key over a session cookie when both are present", async (ctx) => {
+    if (!available) return ctx.skip();
     const cookie = await signIn(users.alice.email, users.alice.password);
 
     const response = await verify({ cookie, "x-api-key": "pmp_definitely_not_a_key" });

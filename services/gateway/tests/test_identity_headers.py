@@ -76,3 +76,44 @@ async def test_a_request_with_no_identity_headers_is_unchanged(app: FastAPI) -> 
     seen = await seen_headers(app, {"accept": "application/json"})
 
     assert "accept" in seen
+
+
+# --------------------------------------------------------------------------
+# Rate-limit keying must not trust client-controlled addresses
+# --------------------------------------------------------------------------
+def _request(headers: dict[str, str], peer: str = "10.0.0.5") -> object:
+    from starlette.requests import Request as StarletteRequest
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
+        "client": (peer, 12345),
+    }
+    return StarletteRequest(scope)
+
+
+def test_client_ip_prefers_the_edge_s_x_real_ip() -> None:
+    from pmp_gateway.app import client_ip
+
+    request = _request({"x-real-ip": "203.0.113.9", "x-forwarded-for": "1.2.3.4, 203.0.113.9"})
+
+    assert client_ip(request) == "203.0.113.9"  # type: ignore[arg-type]
+
+
+def test_a_forged_x_forwarded_for_does_not_change_the_bucket() -> None:
+    """A client can put anything at the front of X-Forwarded-For. If that chose
+    the rate-limit bucket, rotating it would evade the limit entirely."""
+    from pmp_gateway.app import _bucket_key
+
+    a = _request({"x-real-ip": "203.0.113.9", "x-forwarded-for": "1.1.1.1, 203.0.113.9"})
+    b = _request({"x-real-ip": "203.0.113.9", "x-forwarded-for": "2.2.2.2, 203.0.113.9"})
+
+    assert _bucket_key(a, None, "read") == _bucket_key(b, None, "read")  # type: ignore[arg-type]
+
+
+def test_client_ip_falls_back_to_the_socket_peer() -> None:
+    from pmp_gateway.app import client_ip
+
+    assert client_ip(_request({}, peer="10.0.0.7")) == "10.0.0.7"  # type: ignore[arg-type]

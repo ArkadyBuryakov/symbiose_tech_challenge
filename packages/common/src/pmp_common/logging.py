@@ -33,6 +33,8 @@ __all__ = [
 
 _NOISY_LOGGERS = (
     "uvicorn.access",  # replaced by our own access log
+    "httpx",  # one INFO line per upstream call, with the full URL
+    "httpcore",
     "botocore",
     "boto3",
     "urllib3",

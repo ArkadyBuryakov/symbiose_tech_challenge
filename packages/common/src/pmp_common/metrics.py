@@ -57,8 +57,8 @@ PUBLICATION_JOBS = Counter(
 )
 PUBLICATION_JOB_DURATION = Histogram(
     "publication_job_duration_seconds",
-    "Wall-clock duration of a publication job inside the worker.",
-    ["result"],
+    "Wall-clock duration of a publication job inside the worker, by outcome.",
+    ["outcome"],  # CREATED | DEDUPLICATED | POINTER_MOVED | FAILED | skipped
     buckets=(0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600),
 )
 WORKER_INFLIGHT_JOBS = Gauge(

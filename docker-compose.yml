@@ -333,7 +333,9 @@ services:
       CHAOS_CRASH_AFTER_COPY: ${CHAOS_CRASH_AFTER_COPY:-0}
       CHAOS_CRASH_BEFORE_OFFSET_COMMIT: ${CHAOS_CRASH_BEFORE_OFFSET_COMMIT:-0}
       CHAOS_DELAY_MS: ${CHAOS_DELAY_MS:-0}
-    # SIGTERM stops the poll loop; the grace period covers finishing a job.
+    # SIGTERM stops the poll loop and lets the in-flight job finish for up to
+    # WORKER_SHUTDOWN_GRACE_SECONDS (25s) before the worker abandons it itself;
+    # Docker's own SIGKILL comes later still, so the worker always exits first.
     stop_grace_period: 40s
     networks: [pmp]
 
@@ -416,6 +418,8 @@ services:
       S3_HOST_HEADER: s3:9000
       S3_PUBLISH_BUCKET: ${S3_PUBLISH_BUCKET:-publish}
       EDGE_VERIFIER_UPSTREAM: ${EDGE_VERIFIER_BASE_URL:-http://edge-verifier:8000}
+      EDGE_OTEL_TRACE: ${EDGE_OTEL_TRACE:-off}
+      EDGE_OTEL_ENDPOINT: ${EDGE_OTEL_ENDPOINT:-jaeger:4317}
       NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/conf.d
     ports:
       - "127.0.0.1:${EDGE_HTTP_PORT:-8080}:80"
@@ -439,10 +443,79 @@ services:
     networks: [pmp]
 
 
+  # =======================================================================
+  # Observability (profile: observability)
+  #   make up PROFILE=observability
+  # =======================================================================
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    profiles: [observability]
+    <<: *default-restart
+    logging: *default-logging
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2d
+      - --web.enable-lifecycle
+    volumes:
+      - ./ops/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    networks: [pmp]
+
+  grafana:
+    image: grafana/grafana:12.3.0
+    profiles: [observability]
+    <<: *default-restart
+    logging: *default-logging
+    depends_on:
+      prometheus: {condition: service_healthy}
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/pmtiles-platform.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./ops/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
+    networks: [pmp]
+
+  jaeger:
+    # Jaeger v2: accepts OTLP directly on 4317 (gRPC) / 4318 (HTTP).
+    image: jaegertracing/jaeger:2.21.0
+    profiles: [observability]
+    <<: *default-restart
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:16686/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "127.0.0.1:${JAEGER_UI_PORT:-16686}:16686"
+    networks: [pmp]
+
 volumes:
   postgres-data:
   kafka-data:
   s3-data:
+  prometheus-data:
+  grafana-data:
 
 networks:
   pmp:

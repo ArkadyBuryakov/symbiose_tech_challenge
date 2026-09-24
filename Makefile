@@ -15,6 +15,15 @@ COMPOSE_PROFILE_ARGS := --profile $(PROFILE)
 endif
 
 COMPOSE := docker compose $(COMPOSE_FILES) $(COMPOSE_PROFILE_ARGS)
+
+# The observability profile also switches tracing on everywhere: services only
+# export spans when OTEL_EXPORTER_OTLP_ENDPOINT is set, and the edge only
+# starts traces when EDGE_OTEL_TRACE=on.
+ifeq ($(PROFILE),observability)
+export OTEL_EXPORTER_OTLP_ENDPOINT := http://jaeger:4317
+export EDGE_OTEL_TRACE := on
+OBSERVABILITY_SERVICES := prometheus grafana jaeger
+endif
 export GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 
 # Long-running services `up --wait` waits on. The one-shot init containers are
@@ -47,7 +56,7 @@ bootstrap: .env dev-keys/internal-jwt.key ## Create .env and dev keys (no contai
 .PHONY: up
 up: bootstrap ## Build and start the stack, waiting until it is healthy
 	$(COMPOSE) up -d --build
-	$(COMPOSE) up -d --no-build --wait --wait-timeout 300 $(WAIT_SERVICES)
+	$(COMPOSE) up -d --no-build --wait --wait-timeout 300 $(WAIT_SERVICES) $(OBSERVABILITY_SERVICES)
 	@echo "--- one-shot jobs ---"
 	@./scripts/check-oneshots.sh
 	@$(MAKE) --no-print-directory status

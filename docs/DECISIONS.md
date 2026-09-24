@@ -443,3 +443,94 @@ component that is deleted on AWS never held anything worth stealing.
 **Why.** Found by the e2e suite: MinIO sends `Accept-Ranges` itself, so adding
 ours produced `Accept-Ranges: bytes, bytes` — a malformed header some clients
 reject.
+
+---
+
+## Phase 6 — operability
+
+### Client IP comes from `X-Real-IP`, never from the front of `X-Forwarded-For`
+**Decision.** The gateway's anonymous rate-limit buckets and BetterAuth's
+sign-in rate limit both key on `X-Real-IP`, which the edge overwrites with the
+TCP peer it saw.
+**Alternatives.** The first `X-Forwarded-For` entry (what the gateway did
+originally); BetterAuth's `trustedProxies` chain walking.
+**Why.** nginx *appends* to a client-supplied `X-Forwarded-For`, so its first
+entry is whatever the client wants it to be — keying a rate limit on it lets an
+attacker mint a fresh bucket per request. Found while making the e2e suite pass
+BetterAuth's sign-in limit. `trustedProxies` would also work but needs the
+compose/VPC CIDRs baked into config, and the edge already produces a trustworthy
+single value.
+
+### The e2e suite respects the sign-in rate limit instead of loosening it
+**Decision.** Users sign in once per test session; the revocation tests that
+need fresh sessions wait out a `429` using BetterAuth's `x-retry-after`.
+**Alternatives.** A laxer limit in `.env.example`.
+**Why.** Three sign-ins per ten seconds per client is a real credential-stuffing
+control, and a test setup that silently disables it tends to leak into the
+configuration people actually deploy.
+
+### Tracing starts at the edge
+**Decision.** The edge uses the official `nginx:*-otel` image; under
+`PROFILE=observability` it starts a span per request and propagates
+`traceparent`. Services export over OTLP only when
+`OTEL_EXPORTER_OTLP_ENDPOINT` is set; Kafka carries `traceparent` in message
+headers, including through the outbox.
+**Alternatives.** Starting traces at the gateway.
+**Why.** The brief asks for one trace from the edge request to the worker's
+database and S3 calls. Off by default so the normal stack has no exporter
+retrying against a collector that is not running.
+
+### The Grafana dashboard is generated
+**Decision.** `scripts/build-grafana-dashboard.py` writes the provisioned JSON.
+**Why.** Panel ids and grid positions are mechanical; the generator keeps each
+PromQL query readable in one line of review instead of buried in 1,000 lines of
+JSON.
+
+### `/tiles/session` accepts a platform admin without a tenant
+**Decision.** A dedicated dependency, `require_tenant_or_platform_admin`, instead
+of the tenant-only one.
+**Why.** Found by the e2e suite: the handler's platform-admin branch (scope
+`/tiles/private/*`) was unreachable because the tenant check ran first and
+refused a caller with no organization. A scope that depends on *who* is asking
+needs a dependency that admits both kinds of caller and lets the handler decide.
+
+### The worker enforces its own shutdown bound
+**Decision.** On `SIGTERM` the worker stops polling, lets the in-flight job run
+for up to `WORKER_SHUTDOWN_GRACE_SECONDS` (25 s), then exits itself; Docker's
+`stop_grace_period` (40 s) is longer, so the worker always leaves first.
+**Why.** Leaving the bound to the orchestrator's `SIGKILL` skips the final outbox
+drain and the clean consumer-group leave. Abandoning the job is safe for the
+same reasons a crash is: no offset commit, lease stops being renewed,
+content-addressed redo.
+
+---
+
+## Deliberately out of scope (future work)
+
+* **WebSocket / SSE job status.** The UI polls `GET /publications/{id}` every
+  second while a job is in flight. A push channel would need the gateway to
+  proxy WebSocket upgrades (with the same identity check on the handshake) and a
+  fan-out from `publication.results` — a consumer that is not built yet. The
+  results topic and the outbox are already in place for it.
+* **A `publication.results` consumer.** Results are produced (through the
+  outbox) and schema'd, but nothing consumes them yet; they exist for
+  notifications, webhooks and the push channel above.
+* **Shared rate-limit state.** Per-replica token buckets; Redis/ElastiCache is
+  the next step once limits must be exact across replicas.
+* **Version retirement API.** `RETIRED` is supported by the schema and the
+  versioning rules, but there is no endpoint to set it; the runbook shows the
+  SQL.
+* **Visibility changes.** A dataset's visibility is fixed at creation. Changing
+  it requires copying objects between the `public/` and `private/` prefixes and
+  is a separate, deliberate operation.
+* **Row-level security in Postgres** as a second tenant-isolation control
+  (see *Tenant scoping is a parameter* above).
+
+### Chaos tooling reuses the running image, it does not rebuild
+**Decision.** `make chaos-crash-after-copy` and the e2e crash test recreate the
+worker from the image tag and OTLP endpoint of the container that is running.
+**Why.** Found when a commit landed between `make up` and a test run: the image
+tag was being recomputed from `git rev-parse HEAD`, which named an image that
+had never been built. A chaos run should exercise the code under test, not
+silently rebuild it — and recreating the worker without its OTLP endpoint would
+have switched tracing off under the observability profile.

@@ -108,7 +108,9 @@ disallow_untyped_defs = false
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["packages", "services", "tests"]
-addopts = "-q --strict-markers"
+# importlib mode: test files in different packages may share a basename
+# (packages/common/tests/test_identity.py vs services/backend/tests/...).
+addopts = "-q --strict-markers --import-mode=importlib"
 markers = [
     "e2e: end-to-end tests that require the docker compose stack to be running",
 ]

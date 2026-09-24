@@ -83,15 +83,39 @@ class Runner:
         )
         self._consumer: Consumer | None = None
         self._stop = threading.Event()
-        self._draining = False
+        self._outcome = "skipped"
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
     def install_signal_handlers(self) -> None:
+        """Stop polling on SIGTERM, and bound how long the in-flight job may take.
+
+        The job in flight is allowed to finish, because finishing is cheaper
+        than redoing it. But not indefinitely: after
+        ``WORKER_SHUTDOWN_GRACE_SECONDS`` the process exits hard. Abandoning a
+        job there is safe — its offset is not committed and its lease simply
+        stops being renewed, so another worker picks it up after the lease
+        expires, and the content-addressed copy makes the redo idempotent.
+        """
+        grace = self._settings.shutdown_grace_seconds
+
+        def abandon() -> None:
+            log.error(
+                "worker.shutdown_grace_exceeded",
+                grace_seconds=grace,
+                detail="abandoning the in-flight job; its lease will expire and it will be retried",
+            )
+            os._exit(1)
+
         def handle(signum: int, _frame: FrameType | None) -> None:
-            log.info("worker.signal", signal=signal.Signals(signum).name)
+            if self._stop.is_set():
+                return
+            log.info("worker.signal", signal=signal.Signals(signum).name, grace_seconds=grace)
             self._stop.set()
+            deadline = threading.Timer(grace, abandon)
+            deadline.daemon = True
+            deadline.start()
 
         signal.signal(signal.SIGTERM, handle)
         signal.signal(signal.SIGINT, handle)
@@ -190,6 +214,7 @@ class Runner:
 
     def _process(self, event: PublicationRequested, message: Message) -> None:
         started = time.perf_counter()
+        self._outcome = "skipped"
         WORKER_INFLIGHT_JOBS.inc()
         try:
             # 1. Claim -------------------------------------------------------
@@ -213,7 +238,7 @@ class Runner:
             self._run_job(job, event)
         finally:
             WORKER_INFLIGHT_JOBS.dec()
-            PUBLICATION_JOB_DURATION.labels("total").observe(time.perf_counter() - started)
+            PUBLICATION_JOB_DURATION.labels(self._outcome).observe(time.perf_counter() - started)
 
     def _run_job(self, job: catalog.ClaimedJob, event: PublicationRequested) -> None:
         # The heartbeat keeps the lease short (fast recovery from a crash)
@@ -275,6 +300,7 @@ class Runner:
             self._handle_transient(job, event, exc)
             return
 
+        self._outcome = outcome.result.value
         PUBLICATION_JOBS.labels("SUCCEEDED", outcome.result.value, "").inc()
         log.info(
             "worker.job_succeeded",
@@ -374,6 +400,7 @@ class Runner:
                 error_message=detail,
                 dead_lettered=dead_letter,
             )
+        self._outcome = "FAILED"
         PUBLICATION_JOBS.labels("FAILED", "", code.value).inc()
         log.error("worker.job_failed", error_code=code.value, detail=detail, dlq=dead_letter)
 

@@ -21,21 +21,51 @@ SLUG="${SLUG:-chaos-crash-$(date +%s)}"
 FILE="${1:-}"
 
 cd "$REPO_ROOT"
-export GIT_SHA="${GIT_SHA:-$(git rev-parse --short HEAD 2>/dev/null || echo dev)}"
+# Recreate the worker from the image it runs now, and keep its tracing config:
+# recomputing the tag from HEAD breaks once a commit lands after `make up`.
+GIT_SHA="$(docker compose ps worker --format '{{.Image}}' | head -1 | cut -d: -f2)"
+export GIT_SHA
+OTEL_EXPORTER_OTLP_ENDPOINT="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' \
+    "$(docker compose ps -q worker | head -1)" | sed -n 's/^OTEL_EXPORTER_OTLP_ENDPOINT=//p')"
+export OTEL_EXPORTER_OTLP_ENDPOINT
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 json() { python3 -c "import sys,json;d=json.load(sys.stdin);print(d$1)"; }
+
+# Job status is tenant-scoped, so this script signs in as the same user the
+# publication is made as (demo.sh's default), exactly as a client would.
+COOKIE_JAR="$(mktemp)"
+EMAIL="${DEMO_EMAIL:-alice@tenant-a.test}"
+PASSWORD="${DEMO_PASSWORD:-demo-password-alice}"
+api() { curl -sS -b "$COOKIE_JAR" -c "$COOKIE_JAR" -H "Origin: ${BASE_URL}" "$@"; }
+sign_in() {
+    local status
+    for _ in 1 2 3 4 5 6; do
+        status="$(api -o /dev/null -w '%{http_code}' -X POST "${BASE_URL}/api/auth/sign-in/email" \
+            -H 'content-type: application/json' \
+            -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASSWORD}\"}")"
+        [[ "$status" == "200" ]] && return 0
+        # BetterAuth rate-limits sign-in (3 per 10s); wait it out rather than fail.
+        [[ "$status" == "429" ]] && { sleep 11; continue; }
+        echo "sign-in failed with HTTP ${status} — run 'make seed' first" >&2
+        exit 1
+    done
+    echo "sign-in still rate-limited after retries" >&2
+    exit 1
+}
 restore_worker() {
-    docker compose up -d --build --force-recreate worker >/dev/null 2>&1 || true
+    docker compose up -d --no-build --force-recreate worker >/dev/null 2>&1 || true
+    rm -f "$COOKIE_JAR"
 }
 trap restore_worker EXIT
+sign_in
 
 say "1. Restart the worker with CHAOS_CRASH_AFTER_COPY=1"
 # A short lease keeps the demonstration quick; the mechanism is identical at
 # the default 60s.
 CHAOS_CRASH_AFTER_COPY=1 WORKER_LEASE_SECONDS=15 WORKER_RECONCILER_INTERVAL_SECONDS=10 \
     WORKER_STUCK_PENDING_SECONDS=15 \
-    docker compose up -d --build --force-recreate worker >/dev/null
+    docker compose up -d --no-build --force-recreate worker >/dev/null
 sleep 3
 echo "  worker will exit(92) right after the copy, before the DB commit"
 
@@ -56,11 +86,11 @@ docker compose logs worker --since 60s 2>/dev/null \
     | sed 's/^/  worker log: /' || echo "  (crash marker not seen yet)"
 
 say "3. Restart the worker normally"
-docker compose up -d --build --force-recreate worker >/dev/null
+docker compose up -d --no-build --force-recreate worker >/dev/null
 echo "  waiting for the lease to expire and the reconciler to re-emit..."
 
 for i in $(seq 1 60); do
-    JOB="$(curl -sS "${API}/publications/${JOB_ID}")"
+    JOB="$(api "${API}/publications/${JOB_ID}")"
     STATUS="$(echo "$JOB" | json "['status']")"
     printf '\r  t=%02ds status: %-10s' "$((i * 2))" "$STATUS"
     [[ "$STATUS" == "SUCCEEDED" || "$STATUS" == "FAILED" ]] && break
@@ -69,9 +99,9 @@ done
 echo
 
 say "4. Check the outcome"
-VERSIONS="$(curl -sS "${API}/datasets/${DATASET_ID}/versions")"
+VERSIONS="$(api "${API}/datasets/${DATASET_ID}/versions")"
 COUNT="$(echo "$VERSIONS" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')"
-CURRENT="$(curl -sS "${API}/datasets/${DATASET_ID}/current")"
+CURRENT="$(api "${API}/datasets/${DATASET_ID}/current")"
 
 echo "  job status:    $(echo "$JOB" | json "['status']")"
 echo "  job result:    $(echo "$JOB" | json "['result']")"
