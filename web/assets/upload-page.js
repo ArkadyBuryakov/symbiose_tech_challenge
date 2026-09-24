@@ -47,6 +47,32 @@ async function digest(file) {
     return { hex, base64 };
 }
 
+// Loading the spec from a file fills the text box rather than being kept aside,
+// so what gets published is always exactly what is on screen and can be
+// reviewed or tweaked first. Invalid JSON is reported immediately, not at submit.
+const specBox = document.getElementById("spec");
+const specStatus = document.getElementById("spec-status");
+
+document.getElementById("spec-file").addEventListener("change", async (event) => {
+    const file = event.target.files[0];
+    specStatus.classList.remove("error");
+    if (!file) {
+        specStatus.textContent = "";
+        return;
+    }
+    const text = await file.text();
+    try {
+        const parsed = JSON.parse(text);
+        specBox.value = JSON.stringify(parsed, null, 2);
+        const layers = Array.isArray(parsed.layers) ? parsed.layers.length : 0;
+        specStatus.textContent = `loaded ${file.name} (${layers} layer${layers === 1 ? "" : "s"})`;
+    } catch (error) {
+        specBox.value = text;
+        specStatus.textContent = `${file.name} is not valid JSON: ${error.message}`;
+        specStatus.classList.add("error");
+    }
+});
+
 api.session()
     .then((s) => {
         document.getElementById("who").textContent = s?.user?.email ?? "not signed in";

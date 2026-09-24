@@ -50,11 +50,15 @@
                     </div>
                 </div>
                 <div class="field">
-                    <label for="spec">Layer/style spec (JSON, optional)</label>
+                    <label for="spec-file">Layer/style spec (JSON, optional)</label>
+                    <div class="row" style="margin-bottom:8px;align-items:center">
+                        <input id="spec-file" type="file" accept=".json,application/json">
+                        <span id="spec-status" class="muted" style="font-size:13px"></span>
+                    </div>
                     <textarea id="spec" rows="6" style="width:100%;font-family:var(--mono);
                               font-size:12.5px;padding:8px;border:1px solid var(--border);
                               border-radius:6px;background:var(--bg);color:var(--text)"
-                              placeholder='Paste sample-data/input_forest_crowns_pmtiles.spec.json here'></textarea>
+                              placeholder='Choose a .json file above, or paste the spec here'></textarea>
                 </div>
                 <button class="primary" type="submit" id="submit">Upload and publish</button>
             </form>
