@@ -259,3 +259,140 @@ locally; `scripts/make-synthetic-pmtiles.sh` uses it.
 **Why.** No maintained tippecanoe image is publicly pullable. This is a
 developer tool, not part of the running platform, so a two-minute first build is
 an acceptable price for not depending on an image that may vanish.
+
+---
+
+## Phase 3 — edge and map
+
+### nginx proxies to the object store; it does not sign requests
+**Decision.** `/tiles/*` proxies to the publish bucket, which is anonymously
+readable *inside the compose network only*. `/staging-upload/*` forwards a
+presigned request with the internal `Host` intact.
+**Alternatives.** SigV4 signing in nginx (njs), or a small signing proxy.
+**Why.** It is the local shape of CloudFront + Origin Access Control: the CDN
+reads the bucket, nobody else can reach it, and authorisation for private
+objects happens at the edge (signed cookies). Teaching nginx to sign would add a
+moving part that does not exist on AWS at all.
+
+### The presigned URL's origin is rewritten, nothing else
+**Decision.** The backend presigns against `http://s3:9000` and swaps only the
+*origin* for the public edge; nginx forwards the request upstream with
+`Host: s3:9000`.
+**Alternatives.** Publishing the object store on the host; presigning against
+`localhost:8080` directly.
+**Why.** SigV4 signs the `Host` header, so the URL must be signed for the host
+the request will actually carry. Rewriting only the origin keeps the path, the
+query string and therefore the signature intact, keeps the store off the host
+network, and avoids CORS entirely because the browser stays on one origin.
+Verified end to end, including that a mismatched `x-amz-checksum-sha256` is
+rejected with `XAmzContentChecksumMismatch`.
+
+### `Cache-Control` is set at the edge, not trusted from the origin
+**Decision.** `proxy_hide_header Cache-Control` then `add_header`: `immutable`
+for public tiles, `private, max-age=600` for private ones.
+**Alternatives.** Relying on the metadata the worker writes onto the object.
+**Why.** The same object can be served under two policies (a dataset can be
+private), so the policy belongs to the route, not to the bytes. The edge also
+strips the store's `Strict-Transport-Security`, `Vary` and rate-limit headers,
+which are wrong or meaningless here and would otherwise leak the origin.
+
+### The map is built from the stored spec, and falls back to archive metadata
+**Decision.** `buildLayers()` reads `layers`, `style.color_field` and
+`field_ranges_by_resolution` from the version's spec; with no `layers` array it
+falls back to the archive's own `vector_layers`.
+**Alternatives.** Hard-coding the H3 layer names; requiring a full spec.
+**Why.** Adding a resolution or changing the colour field is then a change to
+the published spec, not to the page. The fallback is what lets a minimal spec
+(or none) still render, which matters because the synthetic fixture has no
+hand-written spec.
+
+### Per-resolution colour ranges
+**Decision.** Each H3 layer is coloured against its own `count` range.
+**Alternatives.** One global range from `style.min`/`style.max`.
+**Why.** `count` means different things at different resolutions — r10 tops out
+at 728, r12 at 32 — so a shared scale renders the fine layers almost uniformly
+pale. Each layer gets its own legend for the same reason.
+
+---
+
+## Phase 4 — auth and gateway
+
+### The gateway is a small FastAPI service, not Envoy or Kong
+**Decision.** ~300 lines of FastAPI: route table, verify + cache, internal JWT,
+rate limit, streaming proxy.
+**Alternatives.** Envoy Gateway with `ext_authz`; Kong; an ALB with Lambda
+authorisers.
+**Why.** For this platform the gateway's job is small and unusual enough
+(mint a signed internal identity, per-tenant rate limiting, a pass-through auth
+surface) that the configuration to express it in Envoy would be about as long as
+the code — and much harder to unit-test. The decision is deliberately
+reversible: `/internal/verify` is an ordinary HTTP endpoint, so Envoy's
+`ext_authz` filter could call it unchanged, and the route table is already
+declarative YAML.
+
+### Identity is a signed token, not trusted headers
+**Decision.** The gateway mints a 60-second EdDSA JWT (`aud` = upstream name)
+and the services verify it with the gateway's public key.
+**Alternatives.** `X-User-Id`/`X-Tenant-Id` headers with a NetworkPolicy
+guaranteeing only the gateway can reach the backend.
+**Why.** Trusted headers make every future networking mistake a full
+authentication bypass — a port-forward, a misconfigured policy, a debug sidecar.
+With a signed token the backend is safe even when reached directly, which is
+exactly what the tests assert. The `aud` claim additionally stops a token minted
+for the backend being replayed against another service.
+
+### Revocation bounds, stated explicitly
+**Decision.** Two different bounds, both deliberate:
+* **API** — a revoked session keeps working for at most
+  `GATEWAY_VERIFY_CACHE_TTL` (default 10 s), because successful verifications are
+  cached. BetterAuth's own cookie cache is disabled so nothing else adds to it.
+* **Private tiles** — a signed cookie stays valid until it expires (default
+  10 minutes); there is no revocation list, exactly as with CloudFront.
+**Alternatives.** No verify cache (every request hits the auth service); a
+revocation list checked at the edge.
+**Why.** 10 seconds of staleness in exchange for roughly an order of magnitude
+fewer calls to the auth service is a good trade, and it is a *bounded*, stated
+one. The tile bound is inherent to signed cookies; shortening the TTL is the
+only dial, and 10 minutes keeps refreshes rare while bounding exposure.
+
+### Only successful verifications are cached
+**Decision.** A 401 from `/internal/verify` is never cached.
+**Why.** Caching failures turns a momentary auth-service hiccup into a
+lockout for the whole TTL. The asymmetry costs nothing: failures are rare.
+
+### Rate limiting is per replica and says so
+**Decision.** In-memory token bucket keyed by user id, or client IP when
+anonymous.
+**Alternatives.** Redis counters; no limiting.
+**Why.** It is an abuse control, not a quota: with N replicas the effective
+limit is N times the configured rate. That is fine for what it is for, and the
+step to a shared counter (Redis `INCR`/`EXPIRE`) does not change the interface.
+Keying by user rather than by IP means one noisy tenant cannot starve the rest.
+
+### `/api/auth/*` is a verbatim pass-through
+**Decision.** Policy `public`: no identity check, no internal token, every
+header forwarded unchanged in both directions.
+**Why.** The session cookie is the browser's credential; the gateway has no
+business interpreting, merging or re-signing it. This is also why the proxy
+handles headers as a multi-valued list — collapsing them into a dict silently
+drops all but one `Set-Cookie`, which has its own test.
+
+### Organizations and memberships are seeded with SQL, users through the API
+**Decision.** `signUpEmail` for users (password hashing is BetterAuth's job);
+direct inserts for organizations and members.
+**Alternatives.** `auth.api.createOrganization` / `addMember` throughout.
+**Why.** Those endpoints act on behalf of a session and make the caller an
+owner. The seed needs neither: it needs deterministic ids and a Bob who is only
+a `member`, so that tenant-role authorisation is actually exercised rather than
+assumed.
+
+### A single-organization user does not have to choose one
+**Decision.** `/internal/verify` falls back to the caller's sole membership when
+the session has no active organization; more than one membership with no
+explicit choice yields `tenant_id: null`.
+**Alternatives.** A BetterAuth `session.create.before` hook; requiring an
+explicit choice always.
+**Why.** Refusing a single-tenant user until they pick their only tenant is
+pointless friction, and guessing for a multi-tenant user would silently decide
+which tenant's data a request touches. The fallback lives in `verify` rather
+than in a plugin hook so its behaviour is explicit and testable.

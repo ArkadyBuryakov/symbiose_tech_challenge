@@ -44,9 +44,17 @@ const schema = z.object({
   DB_POOL_MAX: z.coerce.number().int().positive().default(10),
 
   BETTER_AUTH_SECRET_PATH: z.string().default("/run/keys/better-auth.secret"),
-  SESSION_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 24 * 7),
+  SESSION_MAX_AGE_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60 * 60 * 24 * 7),
   /** How often a still-valid session is refreshed while it is being used. */
-  SESSION_UPDATE_AGE_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 24),
+  SESSION_UPDATE_AGE_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60 * 60 * 24),
 
   TRUST_PROXY: boolish("true"),
 });

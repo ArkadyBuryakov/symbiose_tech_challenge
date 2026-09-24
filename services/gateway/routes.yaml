@@ -1,0 +1,44 @@
+# Gateway route table.
+#
+# Every request the edge forwards must match a rule here or it is a 404: the
+# gateway is an allowlist, not a catch-all proxy. `/internal/*` and `/metrics`
+# appear nowhere, which is exactly why they are unreachable from outside.
+#
+# policy:
+#   public          forward untouched, no identity check, no internal token
+#   optional        verify if a credential is present, else forward anonymous
+#   authenticated   401 without a valid credential
+#   platform_admin  403 without the platform admin role
+#
+# The longest matching prefix wins, whatever order the rules are written in.
+
+routes:
+  # BetterAuth owns this surface. It is passed through verbatim so that every
+  # Set-Cookie it emits reaches the browser unchanged — the gateway must not
+  # interpret, merge or re-sign the session cookie.
+  - prefix: /api/auth/
+    upstream: auth
+    policy: public
+    rate_limit: auth
+
+  # Cross-tenant administration. The gateway enforces the role here; the
+  # backend checks it again, because one control is not a control.
+  - prefix: /api/v1/admin/
+    upstream: backend
+    policy: platform_admin
+    rate_limit: default
+
+  # Read-only catalogue. Anonymous callers see public datasets; a signed-in
+  # caller additionally sees their own tenant's. Hence `optional`, not
+  # `authenticated`: requiring a credential here would hide public data.
+  - prefix: /api/v1/datasets
+    upstream: backend
+    policy: optional
+    methods: [GET, HEAD]
+    rate_limit: read
+
+  # Everything else under /api/v1 changes state and needs an identity.
+  - prefix: /api/v1/
+    upstream: backend
+    policy: authenticated
+    rate_limit: default

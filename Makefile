@@ -20,8 +20,8 @@ export GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 # Long-running services `up --wait` waits on. The one-shot init containers are
 # excluded (compose treats any exited container as a failure) and are checked
 # separately by scripts/check-oneshots.sh.
-WAIT_SERVICES := postgres kafka s3 kafka-console auth backend worker
-ONESHOTS := migrate kafka-init s3-init
+WAIT_SERVICES := postgres kafka s3 kafka-console auth gateway backend worker edge
+ONESHOTS := migrate migrate-auth kafka-init s3-init
 export ONESHOTS
 export COMPOSE_CMD := $(COMPOSE)
 
@@ -80,18 +80,49 @@ psql: ## Open a psql shell on the catalogue
 	$(COMPOSE) exec -e PGPASSWORD=$$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-) \
 		postgres psql -U postgres -d pmtiles
 
+# ---------------------------------------------------------------- demo
+.PHONY: seed-rotate
+seed-rotate: ## Re-seed and mint a fresh producer API key
+	$(MAKE) seed rotate=1
+
+.PHONY: seed
+seed: ## Create the demo tenants, users and producer API key
+	$(COMPOSE) run --rm --no-deps -T -e ROTATE_API_KEY=$(rotate) auth node dist/seed.js
+
+.PHONY: demo
+demo: ## Publish a sample archive end to end and print the map URL
+	./scripts/demo.sh $(f) $(slug)
+
+.PHONY: synthetic
+synthetic: ## Generate a synthetic PMTiles archive (needs no sample data)
+	./scripts/make-synthetic-pmtiles.sh sample-data/synthetic.pmtiles
+
+.PHONY: chaos-duplicate
+chaos-duplicate: ## Replay a publication message; assert one version is created
+	./scripts/chaos-duplicate.sh $(f)
+
+.PHONY: chaos-crash-after-copy
+chaos-crash-after-copy: ## Kill the worker between copy and commit; assert clean recovery
+	./scripts/chaos-crash-after-copy.sh $(f)
+
+.PHONY: dlq
+dlq: ## Print the dead-letter topic
+	$(COMPOSE) exec -T kafka rpk topic consume publication.requested.dlq -o :end -f \
+		'--- %k\n%v\n' || true
+
 # ---------------------------------------------------------------- quality
 .PHONY: lint
 lint: ## ruff check + format check + mypy + tsc
 	uv run ruff check packages services tests ops scripts
 	uv run ruff format --check packages services tests ops scripts
 	uv run mypy packages services ops
-	cd services/auth && npm run --silent typecheck
+	cd services/auth && npm run --silent typecheck && npm run --silent format:check
 
 .PHONY: fmt
 fmt: ## Auto-fix lint and formatting
 	uv run ruff check --fix packages services tests ops scripts
 	uv run ruff format packages services tests ops scripts
+	cd services/auth && npm run --silent format
 
 .PHONY: event-schemas
 event-schemas: ## Regenerate docs/events/*.schema.json from the Pydantic models
@@ -100,6 +131,7 @@ event-schemas: ## Regenerate docs/events/*.schema.json from the Pydantic models
 .PHONY: test
 test: ## Run the unit tests (no containers required)
 	uv run pytest packages services -q
+	node --test web/tests/
 	cd services/auth && npm run --silent test --if-present
 
 .PHONY: e2e

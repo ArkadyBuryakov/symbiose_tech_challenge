@@ -1,1 +1,1 @@
-"""Placeholder; filled in by the phase that owns this service."""
+"""Edge-facing API gateway: routing, identity, rate limiting, streaming proxy."""

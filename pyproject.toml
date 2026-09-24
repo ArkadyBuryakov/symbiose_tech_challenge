@@ -17,6 +17,7 @@ dev = [
     "pytest-cov==7.1.0",
     "httpx==0.28.1",
     "types-boto3[s3]==1.43.101",
+    "types-pyyaml==6.0.12.20260906",
 ]
 
 [tool.uv.workspace]
@@ -81,6 +82,16 @@ pretty = true
 show_error_codes = true
 plugins = ["pydantic.mypy"]
 exclude = ["migrations/versions/", "\\.venv/"]
+# `src` layout: tell mypy where each package root is, or it resolves
+# services/*/src/pmp_*/__main__.py to the same module name and gives up.
+explicit_package_bases = true
+mypy_path = [
+    "packages/common/src",
+    "services/backend/src",
+    "services/gateway/src",
+    "services/worker/src",
+    "services/edge-verifier/src",
+]
 
 [[tool.mypy.overrides]]
 module = ["confluent_kafka.*", "pmtiles.*"]

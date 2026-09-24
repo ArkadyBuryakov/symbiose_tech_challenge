@@ -1,0 +1,144 @@
+# Routing for the local edge.
+#
+# Upstreams are template variables so that swapping the API upstream from the
+# backend (phase 3) to the gateway (phase 4) — and, on AWS, deleting this file
+# in favour of CloudFront behaviours — is configuration, not a rewrite.
+
+server {
+    listen 80 default_server;
+    server_name _;
+
+    # Tile archives are large; uploads are larger. Ranges are served from S3.
+    client_max_body_size 0;
+    client_body_timeout 300s;
+
+    include /etc/nginx/conf.d/common-headers.inc;
+
+    # ----------------------------------------------------------------- app
+    location = /healthz {
+        access_log off;
+        include /etc/nginx/conf.d/common-headers.inc;
+        add_header Content-Type application/json always;
+        return 200 '{"status":"ok","service":"edge"}';
+    }
+
+    location / {
+        root /usr/share/nginx/html;
+        index index.html;
+        try_files $uri $uri/ =404;
+        include /etc/nginx/conf.d/common-headers.inc;
+        # The pages are tiny and change with every deploy; the data they load
+        # is what carries long cache lifetimes.
+        add_header Cache-Control "no-cache" always;
+    }
+
+    # ----------------------------------------------------------------- api
+    location /api/ {
+        set $api_upstream ${API_UPSTREAM};
+        proxy_pass $api_upstream$request_uri;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Request-Id $request_id_final;
+        proxy_set_header Connection "";
+
+        proxy_connect_timeout 3s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+
+        # Auth responses set several cookies; nothing here may merge or cache
+        # them. Streaming also keeps large responses off nginx's disk.
+        proxy_buffering off;
+        proxy_request_buffering off;
+    }
+
+    # --------------------------------------------------------------- tiles
+    # Public archives: immutable, content-addressed, cacheable forever.
+    #
+    # The object store is not reachable from the host, so this location is the
+    # only way in — the local equivalent of a CloudFront Origin Access Control.
+    location ~ ^/tiles/public/(?<object_path>.+)$ {
+        set $s3_upstream ${S3_UPSTREAM};
+        proxy_pass $s3_upstream/${S3_PUBLISH_BUCKET}/public/$object_path$is_args$args;
+
+        include /etc/nginx/conf.d/s3-origin.inc;
+
+        # The archive at this key can never change, so revalidation is waste.
+        include /etc/nginx/conf.d/common-headers.inc;
+        proxy_hide_header Cache-Control;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header Accept-Ranges bytes always;
+    }
+
+    # Private archives: same objects, but only for a caller holding a valid
+    # signed cookie for this tenant. On AWS this check is CloudFront's; here it
+    # is delegated to the edge-verifier via auth_request.
+    location ~ ^/tiles/private/(?<tenant_id>[^/]+)/(?<object_path>.+)$ {
+        auth_request /_verify_tile;
+
+        set $s3_upstream ${S3_UPSTREAM};
+        proxy_pass $s3_upstream/${S3_PUBLISH_BUCKET}/private/$tenant_id/$object_path$is_args$args;
+
+        include /etc/nginx/conf.d/s3-origin.inc;
+
+        # Long-lived, but never in a shared cache: the cookie, not the URL, is
+        # what authorises this response.
+        include /etc/nginx/conf.d/common-headers.inc;
+        proxy_hide_header Cache-Control;
+        add_header Cache-Control "private, max-age=600" always;
+        add_header Accept-Ranges bytes always;
+    }
+
+    location = /_verify_tile {
+        internal;
+        set $verifier_upstream ${EDGE_VERIFIER_UPSTREAM};
+        proxy_pass $verifier_upstream/verify;
+
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        # The verifier needs the path (it is what the policy is scoped to) and
+        # the cookies (they carry the signed policy).
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Request-Id $request_id_final;
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 5s;
+    }
+
+    # ------------------------------------------------------- staging upload
+    # Presigned PUTs are signed against the *internal* S3 host, so the Host
+    # header sent upstream must be that host or SigV4 will not verify. Only the
+    # origin of the URL is rewritten by the backend; the path and query (and
+    # therefore the signature) arrive here untouched.
+    location /staging-upload/ {
+        limit_except PUT OPTIONS { deny all; }
+
+        set $s3_upstream ${S3_UPSTREAM};
+        rewrite ^/staging-upload/(.*)$ /$1 break;
+        proxy_pass $s3_upstream;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host ${S3_HOST_HEADER};
+        proxy_set_header Connection "";
+        # Nothing may be added, removed or reordered: every signed header must
+        # reach S3 exactly as the browser sent it.
+        proxy_set_header X-Real-IP $remote_addr;
+
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 600s;
+        proxy_read_timeout 600s;
+
+        proxy_hide_header x-amz-request-id;
+        proxy_hide_header x-amz-id-2;
+    }
+
+    # Internal surfaces must never be reachable from outside.
+    location ~ ^/(internal|metrics|healthz/internal) {
+        return 404;
+    }
+}

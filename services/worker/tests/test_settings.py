@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from pmp_worker.settings import ChaosSettings, WorkerSettings
 
 
@@ -28,9 +29,7 @@ def test_chaos_is_off_by_default() -> None:
 
 
 @pytest.mark.parametrize("value", ["1", "true", "True", "yes", "on"])
-def test_chaos_switches_accept_shell_booleans(
-    monkeypatch: pytest.MonkeyPatch, value: str
-) -> None:
+def test_chaos_switches_accept_shell_booleans(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
     monkeypatch.setenv("CHAOS_CRASH_AFTER_COPY", value)
 
     assert ChaosSettings().crash_after_copy is True

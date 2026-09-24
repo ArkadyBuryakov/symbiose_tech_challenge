@@ -198,6 +198,35 @@ services:
   # =======================================================================
   # Application services
   # =======================================================================
+  migrate-auth:
+    # BetterAuth owns the shape of its own tables, so its own migrator is the
+    # only thing that knows them. Separate from `migrate` because that image is
+    # Python and this one is Node.
+    build:
+      context: ./services/auth
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+    image: pmp/auth:${GIT_SHA:-dev}
+    logging: *default-logging
+    restart: "no"
+    depends_on:
+      postgres: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    command: ["node", "dist/migrate.js"]
+    environment:
+      <<: *common-env
+      DB_HOST: ${DB_HOST:-postgres}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-pmtiles}
+      DB_USER: auth_svc
+      DB_PASSWORD: ${AUTH_DB_PASSWORD:?}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      DB_SCHEMA: auth
+      BETTER_AUTH_SECRET_PATH: /run/keys/better-auth.secret
+    volumes:
+      - ./dev-keys:/run/keys:ro
+    networks: [pmp]
+
   auth:
     build:
       context: ./services/auth
@@ -209,7 +238,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      migrate:
+      migrate-auth:
         condition: service_completed_successfully
     environment:
       <<: *common-env
@@ -306,6 +335,65 @@ services:
       CHAOS_DELAY_MS: ${CHAOS_DELAY_MS:-0}
     # SIGTERM stops the poll loop; the grace period covers finishing a job.
     stop_grace_period: 40s
+    networks: [pmp]
+
+  gateway:
+    # The only thing that talks to the auth service, and the only thing that
+    # mints internal identity tokens.
+    build:
+      context: .
+      dockerfile: ops/docker/python.Dockerfile
+      args:
+        PACKAGE: pmp-gateway
+        SERVICE_DIR: services/gateway
+        MODULE: pmp_gateway
+        HEALTH_PORT: "8000"
+        GIT_SHA: ${GIT_SHA:-dev}
+    image: pmp/gateway:${GIT_SHA:-dev}
+    <<: *default-restart
+    logging: *default-logging
+    depends_on:
+      auth: {condition: service_healthy}
+      backend: {condition: service_healthy}
+    environment:
+      <<: *common-env
+      HTTP_PORT: "8000"
+      GATEWAY_ROUTES_FILE: /app/routes.yaml
+      AUTH_BASE_URL: ${AUTH_BASE_URL:-http://auth:3000}
+      BACKEND_BASE_URL: ${BACKEND_BASE_URL:-http://backend:8000}
+      INTERNAL_JWT_PRIVATE_KEY_PATH: /run/keys/internal-jwt.key
+      GATEWAY_VERIFY_CACHE_TTL: ${GATEWAY_VERIFY_CACHE_TTL:-10}
+      GATEWAY_RATE_LIMIT_RPS: ${GATEWAY_RATE_LIMIT_RPS:-20}
+      GATEWAY_RATE_LIMIT_BURST: ${GATEWAY_RATE_LIMIT_BURST:-40}
+    volumes:
+      - ./dev-keys:/run/keys:ro
+      - ./services/gateway/routes.yaml:/app/routes.yaml:ro
+    networks: [pmp]
+
+  edge:
+    # The only service published on the host. Local stand-in for CloudFront.
+    build:
+      context: .
+      dockerfile: services/edge/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+    image: pmp/edge:${GIT_SHA:-dev}
+    <<: *default-restart
+    logging: *default-logging
+    depends_on:
+      s3: {condition: service_healthy}
+      gateway: {condition: service_healthy}
+    environment:
+      # All API traffic goes through the gateway; the backend is not reachable
+      # from the edge at all.
+      API_UPSTREAM: ${API_UPSTREAM:-http://gateway:8000}
+      S3_UPSTREAM: http://s3:9000
+      S3_HOST_HEADER: s3:9000
+      S3_PUBLISH_BUCKET: ${S3_PUBLISH_BUCKET:-publish}
+      EDGE_VERIFIER_UPSTREAM: ${EDGE_VERIFIER_BASE_URL:-http://edge-verifier:8000}
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/conf.d
+    ports:
+      - "127.0.0.1:${EDGE_HTTP_PORT:-8080}:80"
     networks: [pmp]
 
   # =======================================================================

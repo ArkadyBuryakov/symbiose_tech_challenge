@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Upload · PMTiles platform</title>
+    <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+    <header class="topbar">
+        <h1>PMTiles platform</h1>
+        <nav><a href="/">Datasets</a><a href="/upload.html">Upload</a></nav>
+        <span class="spacer"></span>
+        <span id="who" class="muted"></span>
+    </header>
+
+    <main>
+        <div id="alert"></div>
+
+        <div class="notice">
+            This page stands in for a customer's private processing environment. It asks the
+            API for a short-lived presigned <code>PUT</code>, uploads straight to the staging
+            bucket through the edge, and then calls <code>POST /publications</code> exactly
+            like any other client would.
+        </div>
+
+        <section class="card">
+            <h2>Publish a PMTiles archive</h2>
+            <form id="upload-form">
+                <div class="field">
+                    <label for="file">PMTiles file</label>
+                    <input id="file" type="file" accept=".pmtiles,application/vnd.pmtiles" required>
+                </div>
+                <div class="row">
+                    <div class="field">
+                        <label for="slug">Dataset slug</label>
+                        <input id="slug" required pattern="[a-z0-9][a-z0-9-]{0,62}[a-z0-9]"
+                               placeholder="forest-crowns" value="forest-crowns">
+                    </div>
+                    <div class="field">
+                        <label for="name">Display name</label>
+                        <input id="name" placeholder="Forest crowns density">
+                    </div>
+                    <div class="field">
+                        <label for="visibility">Visibility</label>
+                        <select id="visibility">
+                            <option value="public">public</option>
+                            <option value="private">private</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="field">
+                    <label for="spec">Layer/style spec (JSON, optional)</label>
+                    <textarea id="spec" rows="6" style="width:100%;font-family:var(--mono);
+                              font-size:12.5px;padding:8px;border:1px solid var(--border);
+                              border-radius:6px;background:var(--bg);color:var(--text)"
+                              placeholder='Paste sample-data/input_forest_crowns_pmtiles.spec.json here'></textarea>
+                </div>
+                <button class="primary" type="submit" id="submit">Upload and publish</button>
+            </form>
+        </section>
+
+        <section class="card" id="progress-card" hidden>
+            <h2>Progress</h2>
+            <ol id="steps" class="mono" style="margin:0;padding-left:20px;line-height:1.9"></ol>
+            <div id="result" style="margin-top:14px"></div>
+        </section>
+    </main>
+
+    <script type="module" src="/assets/upload-page.js"></script>
+</body>
+</html>

@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Identity service: users, sessions, organizations (tenants), roles and API keys, built on BetterAuth.",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "tsc --build",
     "dev": "tsx watch src/index.ts",
@@ -13,7 +15,9 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "migrate": "tsx src/migrate.ts",
-    "seed": "tsx src/seed.ts"
+    "seed": "tsx src/seed.ts",
+    "format": "prettier --write src",
+    "format:check": "prettier --check src"
   },
   "dependencies": {
     "@better-auth/api-key": "1.7.5",
@@ -29,6 +33,7 @@
     "@better-auth/cli": "1.4.21",
     "@types/node": "26.6.2",
     "@types/pg": "8.23.1",
+    "prettier": "^3.9.9",
     "tsx": "4.23.15",
     "typescript": "7.0.2",
     "vitest": "5.0.1"

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Map · PMTiles platform</title>
+    <link rel="stylesheet" href="/assets/app.css">
+    <!-- Pinned CDN builds. MapLibre 5.x ships a UMD bundle that needs no
+         bundler and handles its own web worker; the pmtiles protocol plugin
+         teaches MapLibre to read an archive with HTTP range requests. -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.9.0/dist/maplibre-gl.css">
+    <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.9.0/dist/maplibre-gl.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pmtiles@4.5.0/dist/pmtiles.js"></script>
+</head>
+<body class="map-page">
+    <header class="topbar">
+        <h1>PMTiles platform</h1>
+        <nav><a href="/">Datasets</a></nav>
+        <span class="spacer"></span>
+        <span id="dataset-name" class="muted"></span>
+    </header>
+    <main>
+        <div id="map"></div>
+        <aside class="map-panel" id="panel" hidden>
+            <h2 id="panel-title">Dataset</h2>
+            <div id="panel-body"></div>
+        </aside>
+        <div class="map-panel" id="status">Loading…</div>
+    </main>
+    <script type="module" src="/assets/map-page.js"></script>
+</body>
+</html>
