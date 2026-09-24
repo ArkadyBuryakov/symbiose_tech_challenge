@@ -1,1 +1,1 @@
-"""Placeholder; filled in by the phase that owns this service."""
+"""Publication worker: Kafka consumer, outbox relay and reconciler."""

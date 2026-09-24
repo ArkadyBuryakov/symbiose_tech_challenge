@@ -11,6 +11,7 @@ injected into and extracted from message headers explicitly.
 
 from __future__ import annotations
 
+import importlib.util
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any
@@ -70,14 +71,16 @@ def configure_tracing(
 
     trace.set_tracer_provider(provider)
 
-    # httpx is used by the gateway proxy and the backend; instrument it eagerly
-    # so outgoing calls continue the trace.
-    try:
-        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+    # httpx is used by the gateway proxy; instrument it eagerly so outgoing
+    # calls continue the trace. Services that do not depend on httpx (the
+    # worker) simply skip it.
+    if importlib.util.find_spec("httpx") is not None:
+        try:
+            from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
-        HTTPXClientInstrumentor().instrument()
-    except Exception as exc:  # pragma: no cover - instrumentation is best-effort
-        _log.warning("tracing.instrument_httpx_failed", error=str(exc))
+            HTTPXClientInstrumentor().instrument()
+        except Exception as exc:  # pragma: no cover - instrumentation is best-effort
+            _log.warning("tracing.instrument_httpx_failed", error=str(exc))
 
 
 def instrument_fastapi(app: Any, *, excluded_urls: str = "healthz,readyz,metrics") -> None:

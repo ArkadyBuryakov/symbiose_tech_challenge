@@ -174,3 +174,88 @@ cached for ~30 s.
 and behind a CloudFront domain. The short cache on this response plus
 `immutable` on the archive gives the best of both: a version switch is visible
 within 30 seconds, while the tiles themselves are never revalidated.
+
+---
+
+## Phase 2 — worker
+
+### The claim is a conditional UPDATE, not a lock table or a queue
+**Decision.** `UPDATE ... SET status='RUNNING' WHERE id = :job AND (status='PENDING'
+OR (status='RUNNING' AND lease_expires_at < now())) RETURNING *`.
+**Alternatives.** An advisory lock; a separate `job_leases` table; relying on
+Kafka partition ownership alone.
+**Why.** One statement is simultaneously the claim, the mutual exclusion and the
+crash recovery. A redelivered message (or a duplicate produce, or two workers on
+the same partition during a rebalance) returns no row, and the consumer simply
+commits the offset — the duplicate becomes a no-op with no extra machinery.
+Kafka partition ownership alone is not enough, because a rebalance can hand a
+partition to a second consumer while the first is still working.
+
+### Leases are heartbeaten while a job runs
+**Decision.** Default lease 60 s, renewed every 20 s by a background thread for
+as long as the job holds it.
+**Alternatives.** A long fixed lease sized to the worst-case job.
+**Why.** A fixed lease forces a bad trade: long enough for a slow job means a
+crashed worker blocks its job for that long. Heartbeating separates the two — the
+lease now only bounds recovery from a *dead* worker (~1 minute), while a job that
+legitimately runs for an hour keeps its claim by saying so. Verified: with
+`CHAOS_CRASH_AFTER_COPY=1` the job is recovered by the reconciler, the copy is
+skipped as already present, and the same content hash lands as one version row.
+
+### Retries happen in-process, not by re-queuing
+**Decision.** A transient failure sleeps with exponential backoff *and full
+jitter* inside the current message's lease and re-runs the job, up to
+`WORKER_MAX_ATTEMPTS`.
+**Alternatives.** Re-producing to a delay topic; NACK-and-redeliver.
+**Why.** Re-queuing loses partition ordering and turns a dependency outage into
+a retry storm. Full jitter matters specifically when a dependency recovers:
+without it every replica retries in lockstep and knocks it over again. The lease
+is released before each sleep, so a crash during the wait is still recovered
+promptly by the reconciler.
+
+### Permanent failures do not go to the DLQ
+**Decision.** A malformed archive, a missing source or a tenant mismatch marks
+the job `FAILED` with an `error_code` and commits the offset. Only exhausted
+retries are dead-lettered.
+**Alternatives.** Dead-lettering every failure.
+**Why.** The DLQ is a queue of things an operator should look at and possibly
+replay. A file that is not PMTiles will never become PMTiles; replaying it is
+pointless, and burying it among real incidents makes the DLQ worthless. The
+client sees the failure on the job, and `POST /publications/{id}/retry` is the
+supported way to try again after fixing the source.
+
+### Results go through a transactional outbox; requests do not
+**Decision.** The worker writes `publication.results` into `catalog.outbox` in
+the same transaction as the catalogue change; a relay thread drains it with
+`FOR UPDATE SKIP LOCKED`.
+**Alternatives.** Producing directly after the commit (as the backend does).
+**Why.** The asymmetry is deliberate. If the backend loses a request message the
+reconciler re-derives it from the `PENDING` job row — the state *is* the
+recovery. A lost result has no such fallback: the job is already terminal and
+nothing would ever re-emit it. The outbox is the cost of making that impossible.
+
+### Idempotency comes from the content-addressed key, not from bookkeeping
+**Decision.** The publish key is `{visibility}/{tenant}/{dataset}/{sha256}/data.pmtiles`,
+and the copy is skipped when an object of the right size is already there.
+**Alternatives.** Recording "copy done" in the database before committing.
+**Why.** A retry writes identical bytes to an identical key, so repeating the
+copy is harmless by construction rather than by remembering. It also gives
+`immutable` caching for free and makes deduplication across versions trivial.
+
+### One job in flight per process
+**Decision.** The consume loop is synchronous and handles one message at a time;
+concurrency comes from replicas.
+**Alternatives.** A thread pool or asyncio inside the worker.
+**Why.** The expensive steps (hash, copy) are I/O in S3, not CPU here, so a pool
+would mostly add ways for a partial failure to interleave. With one job per
+process the failure model is small enough to hold in your head, and
+`docker compose up --scale worker=N` (or a replica count) is the scaling knob.
+
+### tippecanoe is built from source, not pulled
+**Decision.** `ops/tippecanoe/Dockerfile` builds a pinned tag and caches it
+locally; `scripts/make-synthetic-pmtiles.sh` uses it.
+**Alternatives.** `ghcr.io/felt/tippecanoe` (not anonymously readable),
+`klokantech/tippecanoe` (predates PMTiles output).
+**Why.** No maintained tippecanoe image is publicly pullable. This is a
+developer tool, not part of the running platform, so a two-minute first build is
+an acceptable price for not depending on an image that may vanish.
