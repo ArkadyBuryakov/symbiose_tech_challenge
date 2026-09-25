@@ -1,17 +1,23 @@
 /**
- * Build MapLibre layers from a dataset's stored spec.
+ * Build MapLibre layers from the archive's own metadata, overridden by the
+ * dataset's stored spec.
  *
- * The spec is what the producing pipeline published alongside the tiles, so the
- * map is data-driven: adding an H3 resolution or changing the colour field is a
- * change to the spec, not to this page.
+ * The archive always describes itself (tippecanoe writes `vector_layers` and
+ * `tilestats`), so {@link specFromMetadata} turns that into a base spec: every
+ * layer with its zooms, geometry, fields and value ranges. The spec published
+ * with the version is then merged over it by {@link mergeSpecs}; wherever the
+ * spec says something (colour field, labels, zoom windows, ranges), it wins.
+ * The map is data-driven: adding an H3 resolution or changing the colour field
+ * is a change to the data or the spec, not to this page.
  *
  * Spec shape (see sample-data/input_forest_crowns_pmtiles.spec.json):
  *
  *   style.color_field                  property to colour by
  *   style.min / style.max              global fallback range
  *   style.columns                      popup labels
- *   layers[]                           { layer, minzoom, maxzoom, geometry, columns? }
+ *   layers[]                           { layer, minzoom, maxzoom, geometry, columns?, fields? }
  *   field_ranges_by_resolution["10"]   per-resolution { field: {min, max} }
+ *   field_ranges_by_layer["h3_r10"]    per-layer { field: {min, max} }
  *
  * Per-resolution ranges matter: the same `count` means something different at
  * r10 and r12 (bigger cells hold more), so colouring every layer against one
@@ -37,8 +43,9 @@ function resolutionOf(layerName) {
 }
 
 /**
- * The [min, max] this layer should be coloured against: the per-resolution
- * range, else the global one.
+ * The [min, max] this layer should be coloured against, most specific first:
+ * per-resolution, then per-layer (the spec's, else the archive's tilestats),
+ * then the global range.
  */
 export function rangeFor(spec, layerName) {
     const field = spec?.style?.color_field;
@@ -48,6 +55,9 @@ export function rangeFor(spec, layerName) {
     const resolution = resolutionOf(layerName);
     const byResolution = resolution && spec?.field_ranges_by_resolution?.[resolution]?.[field];
     if (isRange(byResolution)) return [byResolution.min, byResolution.max];
+
+    const byLayer = spec?.field_ranges_by_layer?.[layerName]?.[field];
+    if (isRange(byLayer)) return [byLayer.min, byLayer.max];
 
     return fallback;
 }
@@ -75,11 +85,73 @@ export function colorExpression(field, [min, max]) {
     ];
 }
 
-/** Turn a spec's `layers` into MapLibre layer definitions (none without a spec). */
+const GEOMETRY = { Point: "point", LineString: "line", Polygon: "polygon" };
+
+/**
+ * A base spec from PMTiles metadata: tippecanoe's `vector_layers` (names,
+ * zooms, fields) and `tilestats` (geometry, numeric min/max per attribute).
+ */
+export function specFromMetadata(metadata) {
+    const stats = new Map((metadata?.tilestats?.layers ?? []).map((l) => [l.layer, l]));
+    const layers = [];
+    const ranges = {};
+    for (const vector of metadata?.vector_layers ?? []) {
+        const stat = stats.get(vector.id);
+        layers.push({
+            layer: vector.id,
+            minzoom: vector.minzoom,
+            maxzoom: vector.maxzoom,
+            geometry: GEOMETRY[stat?.geometry] ?? "polygon",
+            fields: Object.keys(vector.fields ?? {}),
+        });
+        for (const attribute of stat?.attributes ?? []) {
+            if (isRange(attribute)) {
+                ranges[vector.id] ??= {};
+                ranges[vector.id][attribute.attribute] = { min: attribute.min, max: attribute.max };
+            }
+        }
+    }
+    return { layers, field_ranges_by_layer: ranges };
+}
+
+/**
+ * Override `base` (from the archive) with `spec` (published with the version).
+ * Layers merge by name, field by field; per-layer ranges merge per field.
+ * Layers only the archive knows are kept, so nothing in the data is hidden.
+ */
+export function mergeSpecs(base, spec) {
+    if (!spec) return base;
+    const layers = new Map((base?.layers ?? []).map((l) => [l.layer, l]));
+    for (const entry of spec.layers ?? []) {
+        layers.set(entry.layer, { ...layers.get(entry.layer), ...entry });
+    }
+    const ranges = { ...base?.field_ranges_by_layer };
+    for (const [layer, fields] of Object.entries(spec.field_ranges_by_layer ?? {})) {
+        ranges[layer] = { ...ranges[layer], ...fields };
+    }
+    return {
+        ...base,
+        ...spec,
+        style: { ...base?.style, ...spec.style },
+        layers: [...layers.values()],
+        field_ranges_by_layer: ranges,
+    };
+}
+
+/** Polygons under lines under points, whatever order the layers are listed in. */
+const DRAW_ORDER = { polygon: 0, line: 1, point: 2 };
+
+/** Turn a spec's `layers` into MapLibre layer definitions. */
 export function buildLayers(spec) {
     const field = spec?.style?.color_field;
     const entries = Array.isArray(spec?.layers) ? spec.layers : [];
-    return entries.flatMap((entry) => layersFor(entry, spec, field));
+    return entries
+        .toSorted(
+            (a, b) =>
+                (DRAW_ORDER[a.geometry ?? "polygon"] ?? 0) -
+                (DRAW_ORDER[b.geometry ?? "polygon"] ?? 0),
+        )
+        .flatMap((entry) => layersFor(entry, spec, field));
 }
 
 function layersFor(entry, spec, field) {
@@ -96,6 +168,17 @@ function layersFor(entry, spec, field) {
         // MapLibre's maxzoom is exclusive, the spec's is inclusive.
         ...(entry.maxzoom != null ? { maxzoom: Math.min(entry.maxzoom + 1, 24) } : {}),
     };
+
+    if (geometry === "line") {
+        return [
+            {
+                ...common,
+                id: `${name}-line`,
+                type: "line",
+                paint: { "line-color": color, "line-width": 2 },
+            },
+        ];
+    }
 
     if (geometry === "point") {
         return [
@@ -131,7 +214,7 @@ function layersFor(entry, spec, field) {
         },
         {
             ...common,
-            id: `${name}-line`,
+            id: `${name}-outline`,
             type: "line",
             paint: {
                 "line-color": "#ffffff",
@@ -143,26 +226,37 @@ function layersFor(entry, spec, field) {
 }
 
 /**
- * Whether a layer carries the colour field. A layer that declares its own
- * `columns` without it (the reference spec's `centroids` has no `count`) is
- * drawn in a solid colour instead: interpolating a missing property would
- * paint every feature the palest ramp colour, invisible against the base.
+ * Whether a layer carries the colour field, judged by its declared `columns`,
+ * else the `fields` the archive lists. A layer without it (the reference
+ * `centroids` has no `count`) is drawn in a solid colour instead:
+ * interpolating a missing property would paint every feature the palest ramp
+ * colour, invisible against the base.
  */
-function hasField(entry, field) {
+export function hasField(entry, field) {
     if (!field) return false;
-    if (!Array.isArray(entry.columns)) return true;
-    return entry.columns.some((c) => c.field === field);
+    if (Array.isArray(entry.columns)) return entry.columns.some((c) => c.field === field);
+    if (Array.isArray(entry.fields)) return entry.fields.includes(field);
+    return true;
 }
 
-/** Popup labels for a layer: its own `columns` if it has them, else the global set. */
+/**
+ * Popup labels for a layer: its own `columns`, else the spec's global set,
+ * else the archive's field names unlabelled.
+ */
 export function columnsFor(spec, layerName) {
     const entry = (spec?.layers ?? []).find((l) => l.layer === layerName);
-    return entry?.columns ?? spec?.style?.columns ?? null;
+    return (
+        entry?.columns ??
+        spec?.style?.columns ??
+        entry?.fields?.map((field) => ({ field })) ??
+        null
+    );
 }
 
 /** Ids of every interactive (clickable) layer produced by {@link buildLayers}. */
 export function interactiveLayerIds(layers) {
-    return layers.filter((l) => l.type !== "line").map((l) => l.id);
+    // Polygon outlines are decoration; the fill underneath is what is clicked.
+    return layers.filter((l) => !l.id.endsWith("-outline")).map((l) => l.id);
 }
 
 export { POINT_COLOR, RAMP, SOURCE_ID };

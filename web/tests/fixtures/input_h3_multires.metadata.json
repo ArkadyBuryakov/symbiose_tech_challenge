@@ -1,0 +1,428 @@
+{
+  "vector_layers": [
+    {
+      "id": "centroids",
+      "minzoom": 19,
+      "maxzoom": 22,
+      "fields": {
+        "D": "Number",
+        "GSV": "Number",
+        "QP": "Number",
+        "WDbw": "Number",
+        "basal_area_class": "String",
+        "dbh_class": "String",
+        "h": "Number",
+        "height_class": "String",
+        "id": "Number",
+        "s_area": "Number",
+        "volume_class": "String",
+        "x": "Number",
+        "y": "Number"
+      }
+    },
+    {
+      "id": "h3_r10",
+      "minzoom": 4,
+      "maxzoom": 15,
+      "fields": {
+        "D_mean_m": "Number",
+        "GSV_m3_ha": "Number",
+        "QP_majority": "Number",
+        "WDbw_mean_kg_m3": "Number",
+        "basal_area_class": "String",
+        "count": "Number",
+        "dbh_class": "String",
+        "h3_index": "String",
+        "h3_resolution": "Number",
+        "h_mean_m": "Number",
+        "height_class": "String",
+        "hex_area_ha": "Number",
+        "s_area_m2_ha": "Number",
+        "trees_ha": "Number",
+        "volume_class": "String"
+      }
+    },
+    {
+      "id": "h3_r11",
+      "minzoom": 16,
+      "maxzoom": 16,
+      "fields": {
+        "D_mean_m": "Number",
+        "GSV_m3_ha": "Number",
+        "QP_majority": "Number",
+        "WDbw_mean_kg_m3": "Number",
+        "basal_area_class": "String",
+        "count": "Number",
+        "dbh_class": "String",
+        "h3_index": "String",
+        "h3_resolution": "Number",
+        "h_mean_m": "Number",
+        "height_class": "String",
+        "hex_area_ha": "Number",
+        "s_area_m2_ha": "Number",
+        "trees_ha": "Number",
+        "volume_class": "String"
+      }
+    },
+    {
+      "id": "h3_r12",
+      "minzoom": 17,
+      "maxzoom": 18,
+      "fields": {
+        "D_mean_m": "Number",
+        "GSV_m3_ha": "Number",
+        "QP_majority": "Number",
+        "WDbw_mean_kg_m3": "Number",
+        "basal_area_class": "String",
+        "count": "Number",
+        "dbh_class": "String",
+        "h3_index": "String",
+        "h3_resolution": "Number",
+        "h_mean_m": "Number",
+        "height_class": "String",
+        "hex_area_ha": "Number",
+        "s_area_m2_ha": "Number",
+        "trees_ha": "Number",
+        "volume_class": "String"
+      }
+    }
+  ],
+  "tilestats": {
+    "layers": [
+      {
+        "layer": "centroids",
+        "geometry": "Point",
+        "attributes": [
+          {
+            "attribute": "D",
+            "type": "number",
+            "min": 0.075,
+            "max": 0.59
+          },
+          {
+            "attribute": "GSV",
+            "type": "number",
+            "min": 0.021061,
+            "max": 4.281211
+          },
+          {
+            "attribute": "QP",
+            "type": "number",
+            "min": 1,
+            "max": 3
+          },
+          {
+            "attribute": "WDbw",
+            "type": "number",
+            "min": 371,
+            "max": 741
+          },
+          {
+            "attribute": "basal_area_class",
+            "type": "string"
+          },
+          {
+            "attribute": "dbh_class",
+            "type": "string"
+          },
+          {
+            "attribute": "h",
+            "type": "number",
+            "min": 4.11,
+            "max": 31.199
+          },
+          {
+            "attribute": "height_class",
+            "type": "string"
+          },
+          {
+            "attribute": "id",
+            "type": "number",
+            "min": 1,
+            "max": 18139
+          },
+          {
+            "attribute": "s_area",
+            "type": "number",
+            "min": 0.004419,
+            "max": 0.273731
+          },
+          {
+            "attribute": "volume_class",
+            "type": "string"
+          },
+          {
+            "attribute": "x",
+            "type": "number",
+            "min": 592370.9375,
+            "max": 593662.75
+          },
+          {
+            "attribute": "y",
+            "type": "number",
+            "min": 6722843,
+            "max": 6723751.5
+          }
+        ]
+      },
+      {
+        "layer": "h3_r10",
+        "geometry": "Polygon",
+        "attributes": [
+          {
+            "attribute": "D_mean_m",
+            "type": "number",
+            "min": 0.079,
+            "max": 0.362
+          },
+          {
+            "attribute": "GSV_m3_ha",
+            "type": "number",
+            "min": 0.020138,
+            "max": 391.661143
+          },
+          {
+            "attribute": "QP_majority",
+            "type": "number",
+            "min": 1,
+            "max": 3
+          },
+          {
+            "attribute": "WDbw_mean_kg_m3",
+            "type": "number",
+            "min": 428,
+            "max": 687.677
+          },
+          {
+            "attribute": "basal_area_class",
+            "type": "string"
+          },
+          {
+            "attribute": "count",
+            "type": "number",
+            "min": 1,
+            "max": 728
+          },
+          {
+            "attribute": "dbh_class",
+            "type": "string"
+          },
+          {
+            "attribute": "h3_index",
+            "type": "string"
+          },
+          {
+            "attribute": "h3_resolution",
+            "type": "number",
+            "min": 10,
+            "max": 10
+          },
+          {
+            "attribute": "h_mean_m",
+            "type": "number",
+            "min": 5.31,
+            "max": 20.104
+          },
+          {
+            "attribute": "height_class",
+            "type": "string"
+          },
+          {
+            "attribute": "hex_area_ha",
+            "type": "number",
+            "min": 1.373111,
+            "max": 1.373506
+          },
+          {
+            "attribute": "s_area_m2_ha",
+            "type": "number",
+            "min": 0.003611,
+            "max": 30.827024
+          },
+          {
+            "attribute": "trees_ha",
+            "type": "number",
+            "min": 0.728082,
+            "max": 530.137564
+          },
+          {
+            "attribute": "volume_class",
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "layer": "h3_r11",
+        "geometry": "Polygon",
+        "attributes": [
+          {
+            "attribute": "D_mean_m",
+            "type": "number",
+            "min": 0.076,
+            "max": 0.443
+          },
+          {
+            "attribute": "GSV_m3_ha",
+            "type": "number",
+            "min": 0.116865,
+            "max": 589.851455
+          },
+          {
+            "attribute": "QP_majority",
+            "type": "number",
+            "min": 1,
+            "max": 3
+          },
+          {
+            "attribute": "WDbw_mean_kg_m3",
+            "type": "number",
+            "min": 414.4,
+            "max": 741
+          },
+          {
+            "attribute": "basal_area_class",
+            "type": "string"
+          },
+          {
+            "attribute": "count",
+            "type": "number",
+            "min": 1,
+            "max": 148
+          },
+          {
+            "attribute": "dbh_class",
+            "type": "string"
+          },
+          {
+            "attribute": "h3_index",
+            "type": "string"
+          },
+          {
+            "attribute": "h3_resolution",
+            "type": "number",
+            "min": 11,
+            "max": 11
+          },
+          {
+            "attribute": "h_mean_m",
+            "type": "number",
+            "min": 5.423,
+            "max": 23.41
+          },
+          {
+            "attribute": "height_class",
+            "type": "string"
+          },
+          {
+            "attribute": "hex_area_ha",
+            "type": "number",
+            "min": 0.196157,
+            "max": 0.196215
+          },
+          {
+            "attribute": "s_area_m2_ha",
+            "type": "number",
+            "min": 0.023137,
+            "max": 38.233207
+          },
+          {
+            "attribute": "trees_ha",
+            "type": "number",
+            "min": 5.096589,
+            "max": 754.43884
+          },
+          {
+            "attribute": "volume_class",
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "layer": "h3_r12",
+        "geometry": "Polygon",
+        "attributes": [
+          {
+            "attribute": "D_mean_m",
+            "type": "number",
+            "min": 0.075,
+            "max": 0.558
+          },
+          {
+            "attribute": "GSV_m3_ha",
+            "type": "number",
+            "min": 0.751434,
+            "max": 1026.278578
+          },
+          {
+            "attribute": "QP_majority",
+            "type": "number",
+            "min": 1,
+            "max": 3
+          },
+          {
+            "attribute": "WDbw_mean_kg_m3",
+            "type": "number",
+            "min": 397.5,
+            "max": 741
+          },
+          {
+            "attribute": "basal_area_class",
+            "type": "string"
+          },
+          {
+            "attribute": "count",
+            "type": "number",
+            "min": 1,
+            "max": 32
+          },
+          {
+            "attribute": "dbh_class",
+            "type": "string"
+          },
+          {
+            "attribute": "h3_index",
+            "type": "string"
+          },
+          {
+            "attribute": "h3_resolution",
+            "type": "number",
+            "min": 12,
+            "max": 12
+          },
+          {
+            "attribute": "h_mean_m",
+            "type": "number",
+            "min": 4.189,
+            "max": 27.834
+          },
+          {
+            "attribute": "height_class",
+            "type": "string"
+          },
+          {
+            "attribute": "hex_area_ha",
+            "type": "number",
+            "min": 0.028022,
+            "max": 0.028031
+          },
+          {
+            "attribute": "s_area_m2_ha",
+            "type": "number",
+            "min": 0.157652,
+            "max": 67.4938
+          },
+          {
+            "attribute": "trees_ha",
+            "type": "number",
+            "min": 35.675578,
+            "max": 1141.831791
+          },
+          {
+            "attribute": "volume_class",
+            "type": "string"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -130,7 +130,7 @@ make up PROFILE=debug                  # + host ports for postgres, kafka, s3, g
 | URL | What |
 |---|---|
 | http://localhost:8080 | Datasets, sign-in, versions, jobs |
-| http://localhost:8080/upload.html | Browser upload (presigned PUT through the edge; only when `DEMO_UPLOAD_ENABLED=true`) |
+| http://localhost:8080/upload.html | Browser upload (presigned PUT through the edge) and the live publication-jobs table; only when `DEMO_UPLOAD_ENABLED=true` |
 | http://localhost:8080/map.html?dataset=… | The map |
 | http://localhost:8081 | Redpanda Console (topics, messages, consumer lag) |
 | http://localhost:3001 | Grafana (`observability` profile) |

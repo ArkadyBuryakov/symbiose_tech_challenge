@@ -17,6 +17,7 @@ from pmp_common.tracing import configure_tracing, instrument_fastapi, instrument
 from pmp_common.web import create_app
 
 from .identity import build_token_verifier
+from .job_events import JobEventHub
 from .routers import admin, datasets, demo, publications, tiles
 from .settings import BackendSettings, get_settings
 from .storage import Storage
@@ -62,6 +63,10 @@ def build_app(settings: BackendSettings | None = None) -> FastAPI:
         producer.start()
         app.state.producer = producer
 
+        job_events = JobEventHub()
+        job_events.start(settings.kafka, client_id=f"backend-events-{settings.git_sha}")
+        app.state.job_events = job_events
+
         log.info(
             "backend.started",
             demo_uploads=settings.demo_upload_enabled,
@@ -70,6 +75,7 @@ def build_app(settings: BackendSettings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            await asyncio.to_thread(job_events.stop)
             await producer.close()
             await app.state.engine.dispose()
             log.info("backend.stopped")

@@ -1,23 +1,24 @@
 /**
- * Demo upload flow.
+ * Demo upload flow plus the tenant's publication jobs.
  *
- * 1. Hash the file in the browser. The digest is bound into the presigned PUT,
- *    so the bytes that arrive are provably the bytes that were declared.
- * 2. Ask the API for a presigned PUT. The URL is signed against the internal
- *    object store but rewritten onto the edge origin, which is why this page
- *    needs no CORS configuration and the store stays off the host network.
- * 3. PUT the file with exactly the headers the API returned — every one of them
- *    is part of the signature.
- * 4. Call POST /publications, then poll the job to a terminal state.
+ * The form reports only the two steps it owns:
+ * 1. Upload to the customer's private staging bucket. The file is hashed in the
+ *    browser and the digest is bound into a presigned PUT, so the bytes that
+ *    arrive are provably the bytes that were declared. The URL is rewritten onto
+ *    the edge origin, which is why no CORS configuration is needed.
+ * 2. POST /publications, which returns the job id.
+ *
+ * What happens to the job afterwards is shown in the jobs table, kept live by a
+ * Server-Sent Events stream the backend feeds from the Kafka topics.
  */
 
 import {
     ApiError,
     api,
-    formatBytes,
+    formatTime,
     newIdempotencyKey,
     notify as showNotice,
-    waitForJob,
+    pill,
 } from "./api.js";
 
 const form = document.getElementById("upload-form");
@@ -25,7 +26,8 @@ const submit = document.getElementById("submit");
 const alertEl = document.getElementById("alert");
 const progressCard = document.getElementById("progress-card");
 const stepsEl = document.getElementById("steps");
-const resultEl = document.getElementById("result");
+const jobsEl = document.getElementById("jobs");
+const liveEl = document.getElementById("live");
 
 const notify = (message, kind) => showNotice(alertEl, message, kind);
 
@@ -38,13 +40,10 @@ function step(text) {
     };
 }
 
-/** SHA-256 of the whole file, hex and base64 (S3 wants base64 in the header). */
-async function digest(file) {
+/** Hex SHA-256 of the whole file; the API binds it into the presigned PUT. */
+async function sha256Hex(file) {
     const buffer = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-    const bytes = new Uint8Array(buffer);
-    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-    const base64 = btoa(String.fromCharCode(...bytes));
-    return { hex, base64 };
+    return Array.from(new Uint8Array(buffer), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // Loading the spec from a file fills the text box rather than being kept aside,
@@ -83,7 +82,6 @@ api.session()
 form.addEventListener("submit", async (event) => {
     event.preventDefault();
     notify("");
-    resultEl.innerHTML = "";
     stepsEl.innerHTML = "";
     progressCard.hidden = false;
     submit.disabled = true;
@@ -100,15 +98,11 @@ form.addEventListener("submit", async (event) => {
             }
         }
 
-        const hashing = step(`Hashing ${file.name} (${formatBytes(file.size)})…`);
-        const { hex, base64 } = await digest(file);
-        hashing(`→ ${hex.slice(0, 16)}…`);
-
-        const presigning = step("Requesting a presigned upload…");
-        const upload = await api.createDemoUpload({ sha256: hex, content_length: file.size });
-        presigning(`→ ${upload.source_key}`);
-
-        const uploading = step("Uploading to the staging bucket…");
+        const uploading = step(`Uploading ${file.name} to the private staging bucket…`);
+        const upload = await api.createDemoUpload({
+            sha256: await sha256Hex(file),
+            content_length: file.size,
+        });
         const response = await fetch(upload.url, {
             method: "PUT",
             // Exactly the headers that were signed, and nothing else.
@@ -121,9 +115,9 @@ form.addEventListener("submit", async (event) => {
                     `${(await response.text()).slice(0, 200)}`,
             );
         }
-        uploading("→ done");
+        uploading(`→ ${upload.source_key}`);
 
-        const publishing = step("Requesting publication…");
+        const requesting = step("Creating the processing job…");
         const accepted = await api.createPublication(
             {
                 dataset_slug: document.getElementById("slug").value,
@@ -134,14 +128,11 @@ form.addEventListener("submit", async (event) => {
             },
             newIdempotencyKey(),
         );
-        publishing(`→ job ${accepted.job_id.slice(0, 8)}`);
+        requesting(`→ job ${accepted.job_id}`);
 
-        const waiting = step("Waiting for the worker…");
-        const job = await waitForJob(accepted.job_id, {
-            onUpdate: (j) => waiting(`→ ${j.status}${j.result ? ` (${j.result})` : ""}`),
-        });
-
-        renderResult(job, accepted.dataset_id);
+        // The stream will announce it too; fetching makes the row appear even
+        // if the stream is reconnecting.
+        upsertJob(await api.getPublication(accepted.job_id));
     } catch (error) {
         const detail = error instanceof ApiError ? `${error.message} [${error.code}]` : error.message;
         notify(detail, "error");
@@ -151,28 +142,104 @@ form.addEventListener("submit", async (event) => {
     }
 });
 
-function renderResult(job, datasetId) {
-    resultEl.innerHTML = "";
-    if (job.status !== "SUCCEEDED") {
-        const p = document.createElement("p");
-        p.className = "error";
-        p.textContent = `Publication failed: ${job.error_code} — ${job.error_message}`;
-        resultEl.appendChild(p);
+// --------------------------------------------------------------------------
+// Jobs table, live over SSE
+// --------------------------------------------------------------------------
+const JOBS_SHOWN = 20;
+const jobs = new Map();
+
+function upsertJob(job) {
+    jobs.set(job.id, job);
+    renderJobs();
+}
+
+async function loadJobs() {
+    try {
+        const page = await api.listPublications({ limit: JOBS_SHOWN });
+        jobs.clear();
+        for (const job of page.items) jobs.set(job.id, job);
+        renderJobs();
+    } catch (error) {
+        emptyJobs(`Could not load jobs: ${error.message}`);
+    }
+}
+
+function emptyJobs(text) {
+    jobsEl.innerHTML = "";
+    const td = jobsEl.insertRow().insertCell();
+    td.colSpan = 7;
+    td.className = "empty";
+    td.textContent = text;
+}
+
+function renderJobs() {
+    const rows = [...jobs.values()]
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .slice(0, JOBS_SHOWN);
+    if (rows.length === 0) {
+        emptyJobs("No publication jobs yet.");
         return;
     }
 
-    const summary = document.createElement("p");
-    summary.textContent =
-        job.result === "CREATED"
-            ? `Published as version ${job.result_version_seq}.`
-            : job.result === "DEDUPLICATED"
-              ? "These exact bytes were already the current version; nothing changed."
-              : `Pointer moved back to existing version ${job.result_version_seq}.`;
+    jobsEl.innerHTML = "";
+    for (const job of rows) {
+        const tr = jobsEl.insertRow();
 
-    const link = document.createElement("a");
-    link.className = "button";
-    link.href = `/map.html?dataset=${datasetId}`;
-    link.textContent = "Open the map";
+        const id = tr.insertCell();
+        id.className = "mono";
+        id.title = job.id;
+        id.textContent = job.id.slice(0, 8);
 
-    resultEl.append(summary, link);
+        tr.insertCell().appendChild(pill(job.status));
+        tr.insertCell().textContent = job.result
+            ? `${job.result}${job.result_version_seq ? ` (v${job.result_version_seq})` : ""}`
+            : "—";
+        tr.insertCell().textContent = job.attempts;
+
+        const error = tr.insertCell();
+        error.className = "mono";
+        error.textContent = job.error_code ?? "—";
+        if (job.error_code) {
+            error.title = job.error_message ?? "";
+            error.classList.add("error");
+        }
+
+        tr.insertCell().textContent = formatTime(job.created_at);
+
+        const actions = tr.insertCell();
+        if (job.status === "SUCCEEDED") {
+            const map = document.createElement("a");
+            map.href = `/map.html?dataset=${job.dataset_id}`;
+            map.textContent = "Map";
+            actions.appendChild(map);
+        } else if (job.status === "FAILED") {
+            const retry = document.createElement("button");
+            retry.textContent = "Retry";
+            retry.onclick = async () => {
+                retry.disabled = true;
+                try {
+                    await api.retryPublication(job.id);
+                    upsertJob(await api.getPublication(job.id));
+                } catch (err) {
+                    notify(`Retry failed: ${err.message}`, "error");
+                    retry.disabled = false;
+                }
+            };
+            actions.appendChild(retry);
+        }
+    }
 }
+
+// EventSource reconnects on its own (the backend ends each stream after a few
+// minutes so the gateway re-checks the session). Every (re)connect reloads the
+// list, so nothing that happened while disconnected is missed.
+const events = new EventSource("/api/v1/publications/events");
+events.onopen = () => {
+    liveEl.textContent = "● live";
+    void loadJobs();
+};
+events.onerror = () => {
+    liveEl.textContent = events.readyState === EventSource.CLOSED ? "offline" : "reconnecting…";
+    if (events.readyState === EventSource.CLOSED) void loadJobs();
+};
+events.addEventListener("job", (event) => upsertJob(JSON.parse(event.data)));

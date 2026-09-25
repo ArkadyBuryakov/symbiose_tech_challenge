@@ -1,6 +1,6 @@
 /**
- * Dataset browser: sign in, switch organization, inspect versions, roll back,
- * and watch publication jobs.
+ * Dataset browser: sign in, switch organization, inspect versions and roll back.
+ * Publication jobs live on the upload page.
  *
  * Every read degrades gracefully for an anonymous visitor — the catalogue
  * serves them public datasets — so the page is useful before signing in.
@@ -18,7 +18,6 @@ const els = {
     detail: document.getElementById("detail"),
     detailTitle: document.getElementById("detail-title"),
     versions: document.getElementById("versions"),
-    jobs: document.getElementById("jobs"),
 };
 
 let session = null;
@@ -79,7 +78,7 @@ function renderSession() {
         await api.signOut();
         session = null;
         renderSession();
-        await refreshAll();
+        await loadDatasets();
     };
     els.sessionArea.appendChild(out);
 }
@@ -110,7 +109,7 @@ async function renderOrganizationPicker() {
         await api.setActiveOrganization(select.value);
         session = await api.session();
         notify(`Active organization: ${select.selectedOptions[0].textContent}`);
-        await refreshAll();
+        await loadDatasets();
     };
     els.sessionArea.insertBefore(select, els.sessionArea.lastChild);
 }
@@ -127,7 +126,7 @@ els.signinForm.addEventListener("submit", async (event) => {
         );
         session = await api.session();
         renderSession();
-        await refreshAll();
+        await loadDatasets();
     } catch (error) {
         notify(
             error instanceof ApiError ? `Sign-in failed: ${error.message}` : String(error),
@@ -250,83 +249,5 @@ async function showVersions(dataset) {
     }
 }
 
-// --------------------------------------------------------------------------
-// Jobs
-// --------------------------------------------------------------------------
-/** Render the jobs table; returns whether any job is still in flight. */
-async function loadJobs() {
-    if (!session?.user) {
-        emptyRow(els.jobs, 7, "Sign in to see publication jobs.");
-        return false;
-    }
-    let page;
-    try {
-        page = await api.listPublications({ limit: 20 });
-    } catch (error) {
-        emptyRow(els.jobs, 7, `Could not load jobs: ${error.message}`);
-        return false;
-    }
-    if (page.items.length === 0) {
-        emptyRow(els.jobs, 7, "No publication jobs yet.");
-        return false;
-    }
-
-    els.jobs.innerHTML = "";
-    for (const job of page.items) {
-        const tr = els.jobs.insertRow();
-
-        const id = tr.insertCell();
-        id.className = "mono";
-        id.title = job.id;
-        id.textContent = job.id.slice(0, 8);
-
-        tr.insertCell().appendChild(pill(job.status));
-        tr.insertCell().textContent = job.result ?? "—";
-        tr.insertCell().textContent = job.attempts;
-
-        const error = tr.insertCell();
-        error.className = "mono";
-        if (job.error_code) {
-            error.textContent = job.error_code;
-            error.title = job.error_message ?? "";
-            error.classList.add("error");
-        } else {
-            error.textContent = "—";
-        }
-
-        tr.insertCell().textContent = formatTime(job.created_at);
-
-        const actions = tr.insertCell();
-        if (job.status === "FAILED") {
-            const retry = document.createElement("button");
-            retry.textContent = "Retry";
-            retry.onclick = async () => {
-                retry.disabled = true;
-                try {
-                    await api.retryPublication(job.id);
-                    notify("Retry queued.");
-                    await refreshAll();
-                } catch (err) {
-                    notify(`Retry failed: ${err.message}`, "error");
-                    retry.disabled = false;
-                }
-            };
-            actions.appendChild(retry);
-        }
-    }
-    return page.items.some((job) => job.status === "PENDING" || job.status === "RUNNING");
-}
-
-let jobsInFlight = false;
-
-async function refreshAll() {
-    [, jobsInFlight] = await Promise.all([loadDatasets(), loadJobs()]);
-}
-
 await loadSession();
-await refreshAll();
-
-// Jobs are asynchronous, so the page refreshes while any of them is in flight.
-setInterval(() => {
-    if (jobsInFlight) void refreshAll();
-}, 3000);
+await loadDatasets();

@@ -19,13 +19,20 @@ import {
     colorExpression,
     columnsFor,
     interactiveLayerIds,
+    mergeSpecs,
     rangeFor,
+    specFromMetadata,
 } from "../assets/style-builder.js";
 
 const SPEC_PATH = fileURLToPath(
     new URL("../../sample-data/input_forest_crowns_pmtiles.spec.json", import.meta.url),
 );
 const realSpec = JSON.parse(readFileSync(SPEC_PATH, "utf8"));
+// vector_layers + tilestats of the real archive (sample-data/input_h3_multires.pmtiles).
+const realMetadata = JSON.parse(
+    readFileSync(new URL("./fixtures/input_h3_multires.metadata.json", import.meta.url), "utf8"),
+);
+const archiveSpec = specFromMetadata(realMetadata);
 
 // --------------------------------------------------------------------- ranges
 test("per-resolution range beats the global range", () => {
@@ -158,7 +165,7 @@ test("outline layers are not clickable", () => {
 
     assert.ok(interactive.includes("h3_r10-fill"));
     assert.ok(interactive.includes("centroids-circle"));
-    assert.ok(!interactive.some((id) => id.endsWith("-line")));
+    assert.ok(!interactive.some((id) => id.endsWith("-outline")));
 });
 
 test("a layer whose own columns lack the colour field gets a solid colour", () => {
@@ -173,4 +180,101 @@ test("layers without their own columns are still coloured by the field", () => {
     const fill = buildLayers(realSpec).find((l) => l.id === "h3_r10-fill");
 
     assert.equal(fill.paint["fill-color"][0], "interpolate");
+});
+
+// ------------------------------------------------------------------- archive
+test("the archive alone describes every layer, its zooms and geometry", () => {
+    const byName = Object.fromEntries(archiveSpec.layers.map((l) => [l.layer, l]));
+
+    assert.deepEqual(Object.keys(byName).sort(), ["centroids", "h3_r10", "h3_r11", "h3_r12"]);
+    assert.equal(byName.h3_r10.geometry, "polygon");
+    assert.equal(byName.centroids.geometry, "point");
+    assert.equal(byName.h3_r10.minzoom, 4);
+    assert.ok(byName.h3_r10.fields.includes("count"));
+    assert.ok(!byName.centroids.fields.includes("count"));
+    assert.deepEqual(archiveSpec.field_ranges_by_layer.h3_r12.count, { min: 1, max: 32 });
+});
+
+test("with no spec, the archive still draws: polygons first, points on top", () => {
+    const ids = buildLayers(mergeSpecs(archiveSpec, null)).map((l) => l.id);
+
+    assert.ok(ids.includes("h3_r10-fill"));
+    assert.equal(ids.at(-1), "centroids-circle");
+});
+
+test("with no spec, popups list the archive's fields", () => {
+    const columns = columnsFor(archiveSpec, "h3_r10");
+
+    assert.ok(columns.some((c) => c.field === "h3_index" && c.label === undefined));
+});
+
+test("with no metadata, the spec alone still draws", () => {
+    const layers = buildLayers(mergeSpecs(specFromMetadata(null), realSpec));
+
+    assert.deepEqual(
+        layers.map((l) => l.id),
+        buildLayers(realSpec).map((l) => l.id),
+    );
+});
+
+// --------------------------------------------------------------------- merge
+test("the spec overrides the archive's zoom windows", () => {
+    const merged = mergeSpecs(archiveSpec, realSpec);
+    const r10 = buildLayers(merged).find((l) => l.id === "h3_r10-fill");
+
+    // Archive says z4-15, the spec says z0-15: the spec wins.
+    assert.equal(r10.minzoom, 0);
+    assert.equal(r10.maxzoom, 16);
+});
+
+test("the spec's labels replace the archive's bare field names", () => {
+    const merged = mergeSpecs(archiveSpec, realSpec);
+
+    assert.deepEqual(columnsFor(merged, "h3_r11"), realSpec.style.columns);
+    assert.ok(columnsFor(merged, "centroids").some((c) => c.label === "Tree id"));
+});
+
+test("the spec's per-resolution range beats the archive's per-layer one", () => {
+    const merged = mergeSpecs(archiveSpec, {
+        ...realSpec,
+        field_ranges_by_resolution: { 12: { count: { min: 5, max: 9 } } },
+    });
+
+    assert.deepEqual(rangeFor(merged, "h3_r12"), [5, 9]);
+});
+
+test("the archive's per-layer range fills in where the spec has none", () => {
+    const spec = { style: { color_field: "count", min: 0, max: 1000 } };
+    const merged = mergeSpecs(archiveSpec, spec);
+
+    assert.deepEqual(rangeFor(merged, "h3_r11"), [1, 148]);
+    assert.deepEqual(rangeFor(spec, "h3_r11"), [0, 1000]);
+});
+
+test("the spec's per-layer ranges merge per field over the archive's", () => {
+    const merged = mergeSpecs(archiveSpec, {
+        field_ranges_by_layer: { h3_r10: { count: { min: 2, max: 3 } } },
+    });
+
+    assert.deepEqual(merged.field_ranges_by_layer.h3_r10.count, { min: 2, max: 3 });
+    assert.ok(merged.field_ranges_by_layer.h3_r10.trees_ha, "other fields are kept");
+});
+
+test("layers only the archive knows about are still drawn", () => {
+    const merged = mergeSpecs(archiveSpec, { layers: [{ layer: "h3_r10", minzoom: 0 }] });
+
+    assert.deepEqual(merged.layers.map((l) => l.layer).sort(), [
+        "centroids",
+        "h3_r10",
+        "h3_r11",
+        "h3_r12",
+    ]);
+    assert.equal(merged.layers.find((l) => l.layer === "h3_r10").geometry, "polygon");
+});
+
+test("a layer without the colour field in the archive gets a solid colour", () => {
+    const merged = mergeSpecs(archiveSpec, { style: { color_field: "count" } });
+    const circle = buildLayers(merged).find((l) => l.id === "centroids-circle");
+
+    assert.equal(circle.paint["circle-color"], POINT_COLOR);
 });

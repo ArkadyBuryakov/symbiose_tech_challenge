@@ -13,10 +13,14 @@ contract:
 
 from __future__ import annotations
 
+import asyncio
+import time
+from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Header, Path, Query, Response, status
+from fastapi import APIRouter, Header, Path, Query, Request, Response, status
+from fastapi.responses import StreamingResponse
 
 from pmp_common.enums import JobStatus, Visibility
 from pmp_common.logging import bind_log_context, get_logger
@@ -28,6 +32,7 @@ from pmp_common.tracing import current_trace_id
 from .. import repository as repo
 from ..deps import Conn, Producer
 from ..identity import CurrentIdentity
+from ..job_events import JobEventHub
 from ..publisher import emit_publication_requested
 from ..schemas import CreatePublicationRequest, JobResponse, Page, PublicationAccepted
 
@@ -133,6 +138,56 @@ async def list_publications(
         offset=offset,
     )
     return Page(items=[JobResponse.model_validate(row) for row in rows], limit=limit, offset=offset)
+
+
+# Comment lines keep the gateway (30 s read timeout) and edge (60 s) from
+# closing an idle stream. Streams end after STREAM_MAX_SECONDS so the browser's
+# EventSource reconnects through the gateway, which re-verifies the session:
+# that bounds how long a revoked session keeps receiving events.
+KEEPALIVE_SECONDS = 15.0
+STREAM_MAX_SECONDS = 300.0
+
+
+@router.get(
+    "/events",
+    response_class=StreamingResponse,
+    summary="Live job updates (Server-Sent Events)",
+    responses={200: {"content": {"text/event-stream": {}}}},
+)
+async def publication_events(request: Request, identity: CurrentIdentity) -> StreamingResponse:
+    """Stream ``event: job`` messages, each the full :class:`JobResponse` of a
+    job of the caller's tenant whose status changed, driven by the Kafka
+    ``publication.requested`` / ``publication.results`` topics."""
+    tenant_id = identity.require_tenant()
+    hub: JobEventHub = request.app.state.job_events
+    engine = request.app.state.engine
+    queue = hub.subscribe(tenant_id)
+
+    async def stream() -> AsyncIterator[str]:
+        deadline = time.monotonic() + STREAM_MAX_SECONDS
+        try:
+            yield "retry: 2000\n\n"
+            while time.monotonic() < deadline:
+                try:
+                    job_id = await asyncio.wait_for(queue.get(), KEEPALIVE_SECONDS)
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                # A connection per event, not per stream: a stream is open for
+                # minutes and must not pin a pool slot.
+                async with engine.connect() as conn:
+                    row = await repo.get_job(conn, job_id, tenant_id=tenant_id)
+                if row is not None:
+                    job = JobResponse.model_validate(row).model_dump_json()
+                    yield f"event: job\ndata: {job}\n\n"
+        finally:
+            hub.unsubscribe(tenant_id, queue)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/{job_id}", response_model=JobResponse, summary="Get one publication job")

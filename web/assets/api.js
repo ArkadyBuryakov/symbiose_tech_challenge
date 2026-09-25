@@ -87,18 +87,6 @@ export const api = {
         }),
 };
 
-/** Poll a publication job until it reaches a terminal state. */
-export async function waitForJob(jobId, { onUpdate, intervalMs = 1000, timeoutMs = 120000 } = {}) {
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-        const job = await api.getPublication(jobId);
-        onUpdate?.(job);
-        if (job.status === "SUCCEEDED" || job.status === "FAILED") return job;
-        if (Date.now() > deadline) throw new Error(`job ${jobId} did not finish in time`);
-        await new Promise((resolve) => setTimeout(resolve, intervalMs));
-    }
-}
-
 export function formatBytes(bytes) {
     if (bytes == null) return "—";
     const units = ["B", "KB", "MB", "GB", "TB"];

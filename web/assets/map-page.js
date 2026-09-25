@@ -2,8 +2,9 @@
  * Render a dataset's current version.
  *
  * The page knows nothing about the data: it asks the catalogue for the current
- * version, points the pmtiles protocol at the returned edge URL, and builds the
- * layers from the spec that was stored with that version.
+ * version, points the pmtiles protocol at the returned edge URL, reads the
+ * archive's own metadata for its layers, and overrides that with the spec that
+ * was stored with the version.
  *
  * For a private dataset it first exchanges its session for short-lived signed
  * tile cookies, and refreshes them before they expire so a long map session
@@ -12,12 +13,16 @@
 
 import { api, formatBytes } from "./api.js";
 import {
+    POINT_COLOR,
     SOURCE_ID,
     RAMP,
     buildLayers,
     columnsFor,
+    hasField,
     interactiveLayerIds,
+    mergeSpecs,
     rangeFor,
+    specFromMetadata,
 } from "./style-builder.js";
 
 const statusEl = document.getElementById("status");
@@ -97,14 +102,27 @@ async function main() {
         }
     }
 
-    // The map is drawn from the spec published with this version.
-    const layers = buildLayers(current.spec);
-    if (layers.length === 0) {
-        return fail("This version has no layer spec to draw.");
-    }
-
     const protocol = new pmtiles.Protocol();
     maplibregl.addProtocol("pmtiles", protocol.tile);
+    // Registered with the protocol so MapLibre reuses this instance (and the
+    // header and directories it has already fetched) for the tiles.
+    const archive = new pmtiles.PMTiles(current.url);
+    protocol.add(archive);
+
+    // The archive describes its own layers; the spec published with this
+    // version overrides whatever it states. An unreadable metadata block is not
+    // fatal as long as the spec alone can draw the map.
+    let metadata = null;
+    try {
+        metadata = await archive.getMetadata();
+    } catch (error) {
+        console.warn("[map] archive metadata unavailable", error);
+    }
+    const spec = mergeSpecs(specFromMetadata(metadata), current.spec);
+    const layers = buildLayers(spec);
+    if (layers.length === 0) {
+        return fail("Nothing to draw: the archive lists no layers and the version has no spec.");
+    }
 
     const header = current.pmtiles_header ?? {};
     const maxZoom = header.max_zoom ?? 22;
@@ -133,8 +151,8 @@ async function main() {
         for (const layer of layers) map.addLayer(layer);
 
         statusEl.hidden = true;
-        renderPanel(dataset, current, layers);
-        wirePopups(map, current.spec, interactiveLayerIds(layers));
+        renderPanel(dataset, current, spec, layers);
+        wirePopups(map, spec, interactiveLayerIds(layers));
     });
 
     map.on("error", (event) => {
@@ -154,11 +172,11 @@ async function startTileSession() {
     }, refreshMs);
 }
 
-function renderPanel(dataset, current, layers) {
+function renderPanel(dataset, current, spec, layers) {
     panelEl.hidden = false;
     panelTitle.textContent = dataset.name;
 
-    const field = current.spec?.style?.color_field;
+    const field = spec.style?.color_field;
     const header = current.pmtiles_header ?? {};
     const rows = [
         ["Version", `v${current.seq}`],
@@ -180,33 +198,45 @@ function renderPanel(dataset, current, layers) {
     }
     panelBody.appendChild(dl);
 
-    if (field) panelBody.appendChild(buildLegend(current.spec, field));
+    panelBody.appendChild(buildLegend(spec, field));
 }
 
 /**
- * One legend per drawn layer: because each H3 resolution is coloured against
- * its own range, a single shared scale would be misleading.
+ * One legend entry per layer of the merged spec (archive metadata overridden
+ * by the version's spec), in zoom order. A layer coloured by the field gets
+ * its own ramp and range: each H3 resolution is coloured against its own
+ * range, so one shared scale would be misleading. Any other layer gets a
+ * swatch of the solid colour it is drawn in.
  */
 function buildLegend(spec, field) {
     const wrapper = document.createElement("div");
     wrapper.className = "legend";
 
-    const label = document.createElement("div");
-    label.className = "muted";
-    label.style.marginTop = "10px";
-    label.textContent = labelFor(spec, field);
-    wrapper.appendChild(label);
+    if (field) {
+        const label = document.createElement("div");
+        label.className = "muted";
+        label.textContent = labelFor(spec, field);
+        wrapper.appendChild(label);
+    }
 
     const gradient = `linear-gradient(to right, ${RAMP.join(", ")})`;
-    for (const entry of spec?.layers ?? []) {
-        if (entry.geometry === "point" && (spec.layers ?? []).length > 1) continue;
-        const [min, max] = rangeFor(spec, entry.layer);
-
+    const entries = (spec.layers ?? []).toSorted((a, b) => (a.minzoom ?? 0) - (b.minzoom ?? 0));
+    for (const entry of entries) {
+        const geometry = entry.geometry ?? "polygon";
         const name = document.createElement("div");
-        name.className = "muted mono";
-        name.style.marginTop = "8px";
-        name.textContent = `${entry.layer} · z${entry.minzoom}–${entry.maxzoom}`;
+        name.className = "legend-name mono";
+        name.textContent = `${entry.layer} · ${geometry} · ${zoomLabel(entry)}`;
+        wrapper.appendChild(name);
 
+        if (!hasField(entry, field)) {
+            const swatch = document.createElement("span");
+            swatch.className = `legend-swatch legend-swatch-${geometry}`;
+            swatch.style.setProperty("--swatch", POINT_COLOR);
+            name.prepend(swatch);
+            continue;
+        }
+
+        const [min, max] = rangeFor(spec, entry.layer);
         const bar = document.createElement("div");
         bar.className = "legend-bar";
         bar.style.background = gradient;
@@ -215,9 +245,15 @@ function buildLegend(spec, field) {
         scale.className = "legend-scale";
         scale.innerHTML = `<span>${fmtNumber(min)}</span><span>${fmtNumber(max)}</span>`;
 
-        wrapper.append(name, bar, scale);
+        wrapper.append(bar, scale);
     }
     return wrapper;
+}
+
+function zoomLabel({ minzoom, maxzoom }) {
+    if (minzoom == null && maxzoom == null) return "all zooms";
+    if (minzoom === maxzoom) return `z${minzoom}`;
+    return `z${minzoom ?? 0}–${maxzoom ?? "∞"}`;
 }
 
 function labelFor(spec, field) {

@@ -117,9 +117,14 @@ def make_producer(settings: KafkaSettings, *, client_id: str) -> Producer:
 
 
 def make_consumer(
-    settings: KafkaSettings, *, client_id: str, group_id: str | None = None
+    settings: KafkaSettings,
+    *,
+    client_id: str,
+    group_id: str | None = None,
+    overrides: dict[str, Any] | None = None,
 ) -> Consumer:
-    return Consumer(_consumer_config(settings, client_id=client_id, group_id=group_id))
+    config = _consumer_config(settings, client_id=client_id, group_id=group_id)
+    return Consumer({**config, **(overrides or {})})
 
 
 class AsyncProducer:

@@ -67,8 +67,18 @@
         <section class="card" id="progress-card" hidden>
             <h2>Progress</h2>
             <ol id="steps" class="mono" style="margin:0;padding-left:20px;line-height:1.9"></ol>
-            <div id="result" style="margin-top:14px"></div>
         </section>
+
+        <h2>Publication jobs <span id="live" class="muted" style="font-size:13px"></span></h2>
+        <div class="card" style="padding:0">
+            <table>
+                <thead>
+                    <tr><th>Job</th><th>Status</th><th>Result</th><th>Attempts</th>
+                        <th>Error</th><th>Requested</th><th></th></tr>
+                </thead>
+                <tbody id="jobs"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+            </table>
+        </div>
     </main>
 
     <script type="module" src="/assets/upload-page.js"></script>

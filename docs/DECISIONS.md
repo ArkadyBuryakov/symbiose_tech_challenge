@@ -200,10 +200,33 @@ into deployed configuration.
 **Chaos scenarios are e2e tests.** `make chaos-*` runs them. They recreate the
 worker from the image it is running, not by rebuilding.
 
+**The map starts from the archive's own metadata; the version's spec
+overrides it.** Tippecanoe writes `vector_layers` (layers, zooms, fields) and
+`tilestats` (geometry, numeric min/max) into every archive, so the map page
+reads them with `PMTiles.getMetadata()` (the same instance serves the tiles,
+so no extra header fetch) and builds a base spec. The published spec is merged
+over it by layer name: zoom windows, geometry, labels, colour field and ranges
+from the spec win, while layers only the archive lists are still drawn. A
+version published without a spec therefore still renders, in a solid colour.
+
+**Live job status is SSE from the backend, fed by Kafka.** Each backend
+process tails `publication.requested` and `publication.results` in its own
+throwaway consumer group, starting at `latest` and never committing, so every
+replica sees every event. It fans `(tenant_id, job_id)` out to that tenant's
+open `GET /publications/events` streams, and each stream re-reads the job row
+before sending it, so the browser only gets tenant-scoped database rows, never
+raw event payload. SSE is plain HTTP, so it goes through the existing streaming
+gateway and edge unchanged. WebSocket would have needed upgrade handling in
+both. A 15 s keepalive stays under the gateway's 30 s read timeout. Streams
+end after 5 minutes and the browser's `EventSource` reconnects through the
+gateway, which re-checks the session; that bounds how long a revoked session
+keeps receiving events. The alternative, polling from the page, keeps working
+with no Kafka at all but is not live.
+
 ## Out of scope (future work)
 
-- WebSocket/SSE job status; the UI polls.
-- A `publication.results` consumer; results are produced and have schemas.
+- A `RUNNING` event. The worker's claim emits nothing, so the live stream shows
+  `PENDING` and then the terminal state.
 - Shared (Redis) rate-limit state.
 - A version-retirement API; the runbook shows the SQL.
 - Changing a dataset's visibility, which means copying objects between prefixes.
