@@ -8,10 +8,8 @@ import pytest
 
 from pmp_worker.multipart import (
     MAX_PARTS,
-    MAX_SINGLE_COPY_BYTES,
     MIN_PART_BYTES,
     CopyPart,
-    needs_multipart,
     plan_copy_parts,
 )
 
@@ -27,12 +25,6 @@ def assert_covers_exactly(parts: list[CopyPart], size: int) -> None:
     for previous, current in pairwise(parts):
         assert current.first_byte == previous.last_byte + 1
     assert sum(p.size for p in parts) == size
-
-
-def test_small_objects_do_not_need_multipart() -> None:
-    assert not needs_multipart(1)
-    assert not needs_multipart(MAX_SINGLE_COPY_BYTES)
-    assert needs_multipart(MAX_SINGLE_COPY_BYTES + 1)
 
 
 def test_exact_multiple_of_part_size() -> None:
@@ -52,13 +44,13 @@ def test_ragged_final_part() -> None:
     assert parts[-1].size == 7 * MIB
 
 
-def test_tiny_remainder_is_absorbed_into_the_previous_part() -> None:
-    """A middle part below 5 MiB is rejected by S3, so a 1-byte tail must be
-    merged rather than emitted as its own part."""
+def test_tiny_remainder_is_its_own_last_part() -> None:
+    """S3 allows the *last* part to be below 5 MiB."""
     size = 100 * MIB + 1
     parts = plan_copy_parts(size, part_size=100 * MIB)
 
-    assert len(parts) == 1
+    assert len(parts) == 2
+    assert parts[-1].size == 1
     assert_covers_exactly(parts, size)
 
 
@@ -82,7 +74,8 @@ def test_part_size_grows_to_respect_the_10000_part_limit() -> None:
 def test_copy_source_range_is_the_inclusive_form_s3_expects() -> None:
     parts = plan_copy_parts(10 * MIB, part_size=6 * MIB)
 
-    assert parts[0].copy_source_range == f"bytes=0-{10 * MIB - 1}"
+    assert parts[0].copy_source_range == f"bytes=0-{6 * MIB - 1}"
+    assert parts[1].copy_source_range == f"bytes={6 * MIB}-{10 * MIB - 1}"
 
 
 def test_single_byte_object() -> None:

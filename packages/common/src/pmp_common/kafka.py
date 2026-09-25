@@ -30,16 +30,22 @@ from .config import KafkaSettings
 from .logging import get_logger
 
 __all__ = [
+    "TOPIC_DLQ",
+    "TOPIC_REQUESTED",
+    "TOPIC_RESULTS",
     "AsyncProducer",
     "DeliveryError",
-    "KafkaHeaders",
     "make_consumer",
     "make_producer",
-    "producer_config",
 ]
 
 log = get_logger(__name__)
 KafkaHeaders = Sequence[tuple[str, bytes]]
+
+# Topic names are part of the platform contract, not per-environment config.
+TOPIC_REQUESTED = "publication.requested"
+TOPIC_RESULTS = "publication.results"
+TOPIC_DLQ = "publication.requested.dlq"
 
 
 class DeliveryError(Exception):
@@ -64,7 +70,7 @@ def _security_config(settings: KafkaSettings) -> dict[str, Any]:
     }
 
 
-def producer_config(settings: KafkaSettings, *, client_id: str) -> dict[str, Any]:
+def _producer_config(settings: KafkaSettings, *, client_id: str) -> dict[str, Any]:
     """Producer configuration: idempotent, fully acknowledged, ordered."""
     return {
         "bootstrap.servers": settings.bootstrap_servers,
@@ -81,7 +87,7 @@ def producer_config(settings: KafkaSettings, *, client_id: str) -> dict[str, Any
     }
 
 
-def consumer_config(
+def _consumer_config(
     settings: KafkaSettings, *, client_id: str, group_id: str | None = None
 ) -> dict[str, Any]:
     """Consumer configuration: manual offset commits, long poll interval.
@@ -107,13 +113,13 @@ def consumer_config(
 
 
 def make_producer(settings: KafkaSettings, *, client_id: str) -> Producer:
-    return Producer(producer_config(settings, client_id=client_id))
+    return Producer(_producer_config(settings, client_id=client_id))
 
 
 def make_consumer(
     settings: KafkaSettings, *, client_id: str, group_id: str | None = None
 ) -> Consumer:
-    return Consumer(consumer_config(settings, client_id=client_id, group_id=group_id))
+    return Consumer(_consumer_config(settings, client_id=client_id, group_id=group_id))
 
 
 class AsyncProducer:
@@ -157,13 +163,18 @@ class AsyncProducer:
             raise RuntimeError("AsyncProducer.start() must be called inside the event loop")
         future: asyncio.Future[None] = loop.create_future()
 
-        def _on_delivery(err: KafkaError | None, _msg: Message) -> None:
+        def _resolve(err: KafkaError | None) -> None:
+            # Runs on the loop thread, so the done() check cannot race with
+            # wait_for() cancelling the future on timeout.
             if future.done():
                 return
             if err is not None:
-                loop.call_soon_threadsafe(future.set_exception, DeliveryError(str(err)))
+                future.set_exception(DeliveryError(str(err)))
             else:
-                loop.call_soon_threadsafe(future.set_result, None)
+                future.set_result(None)
+
+        def _on_delivery(err: KafkaError | None, _msg: Message) -> None:
+            loop.call_soon_threadsafe(_resolve, err)
 
         self._producer.produce(
             topic,
@@ -196,6 +207,3 @@ class AsyncProducer:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
-
-
-__all__ += ["consumer_config"]

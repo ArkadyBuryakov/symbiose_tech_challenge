@@ -211,6 +211,49 @@ describe.runIf(process.env.SKIP_DB_TESTS !== "1")("/internal/verify", () => {
     }
   });
 
+  it("ignores a tenant in API-key metadata that the key's owner is not a member of", async (ctx) => {
+    if (!available) return ctx.skip();
+    // Metadata is client-writable: anyone signed in can create a key naming
+    // any organization. Bob (tenant-b) must not become a tenant-a caller.
+    const bob = await pool.query<{ id: string }>(
+      `SELECT id FROM "user" WHERE email = 'bob@tenant-b.test'`,
+    );
+    const created = await auth.api.createApiKey({
+      body: {
+        userId: bob.rows[0]!.id,
+        name: `vitest-forged-${Date.now()}`,
+        metadata: { tenant_id: "org_tenant-a" },
+      },
+    });
+
+    try {
+      const response = await verify({ "x-api-key": created.key });
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.tenant_id).toBeNull();
+      expect(body.tenant_role).toBeNull();
+    } finally {
+      await pool.query(`DELETE FROM "apikey" WHERE id = $1`, [created.id]);
+    }
+  });
+
+  it("refuses public sign-up", async (ctx) => {
+    if (!available) return ctx.skip();
+    const response = await app.request("/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: ORIGIN },
+      body: JSON.stringify({
+        email: `intruder-${Date.now()}@example.test`,
+        password: "a-long-enough-password",
+        name: "Intruder",
+      }),
+    });
+
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBeLessThan(500);
+  });
+
   it("rejects an API key that does not exist", async (ctx) => {
     if (!available) return ctx.skip();
     const response = await verify({ "x-api-key": "pmp_definitely_not_a_key" });

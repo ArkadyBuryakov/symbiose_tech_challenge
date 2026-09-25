@@ -32,5 +32,12 @@ proxy_hide_header X-Ratelimit-Limit;
 proxy_hide_header X-Ratelimit-Remaining;
 proxy_hide_header Vary;
 
+# The edge owns caching and range advertisement. Replace, don't append: the
+# store sends these too, and a duplicated `Accept-Ranges: bytes, bytes` is
+# malformed. Each tile location adds its own Cache-Control.
+proxy_hide_header Cache-Control;
+proxy_hide_header Accept-Ranges;
+add_header Accept-Ranges bytes always;
+
 # Anything the object store says about the object itself is passed through:
-# ETag, Content-Range, Accept-Ranges, Content-Length, Last-Modified.
+# ETag, Content-Range, Content-Length, Last-Modified.

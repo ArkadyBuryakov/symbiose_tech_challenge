@@ -22,6 +22,17 @@ server {
         return 200 '{"status":"ok","service":"edge"}';
     }
 
+    # The demo upload page exists only when DEMO_UPLOAD_ENABLED=true.
+    location = /upload.html {
+        set $demo_upload_enabled "${DEMO_UPLOAD_ENABLED}";
+        if ($demo_upload_enabled != "true") {
+            return 404;
+        }
+        root /usr/share/nginx/html;
+        include /etc/nginx/conf.d/common-headers.inc;
+        add_header Cache-Control "no-cache" always;
+    }
+
     location / {
         root /usr/share/nginx/html;
         index index.html;
@@ -69,12 +80,7 @@ server {
 
         # The archive at this key can never change, so revalidation is waste.
         include /etc/nginx/conf.d/common-headers.inc;
-        # Replace, don't append: the store sends these too, and a duplicated
-        # `Accept-Ranges: bytes, bytes` is malformed.
-        proxy_hide_header Cache-Control;
-        proxy_hide_header Accept-Ranges;
         add_header Cache-Control "public, max-age=31536000, immutable" always;
-        add_header Accept-Ranges bytes always;
     }
 
     # Private archives: same objects, but only for a caller holding a valid
@@ -91,12 +97,7 @@ server {
         # Long-lived, but never in a shared cache: the cookie, not the URL, is
         # what authorises this response.
         include /etc/nginx/conf.d/common-headers.inc;
-        # Replace, don't append: the store sends these too, and a duplicated
-        # `Accept-Ranges: bytes, bytes` is malformed.
-        proxy_hide_header Cache-Control;
-        proxy_hide_header Accept-Ranges;
         add_header Cache-Control "private, max-age=600" always;
-        add_header Accept-Ranges bytes always;
     }
 
     location = /_verify_tile {
@@ -107,8 +108,11 @@ server {
         proxy_pass_request_body off;
         proxy_set_header Content-Length "";
         # The verifier needs the path (it is what the policy is scoped to) and
-        # the cookies (they carry the signed policy).
-        proxy_set_header X-Original-URI $request_uri;
+        # the cookies (they carry the signed policy). It must be the
+        # *normalised* $uri that nginx routed on, not the raw $request_uri:
+        # otherwise `/tiles/private/<mine>/..%2F<theirs>/...` is authorised
+        # against <mine> and served from <theirs>.
+        proxy_set_header X-Original-URI $uri$is_args$args;
         proxy_set_header X-Request-Id $request_id_final;
         proxy_connect_timeout 2s;
         proxy_read_timeout 5s;
@@ -141,10 +145,5 @@ server {
 
         proxy_hide_header x-amz-request-id;
         proxy_hide_header x-amz-id-2;
-    }
-
-    # Internal surfaces must never be reachable from outside.
-    location ~ ^/(internal|metrics|healthz/internal) {
-        return 404;
     }
 }

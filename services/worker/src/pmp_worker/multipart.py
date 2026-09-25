@@ -8,13 +8,12 @@ the map, so the arithmetic lives here on its own and is unit-tested.
 Constraints this encodes (S3 API limits):
 
 * a single ``CopyObject`` handles objects up to 5 GiB;
-* every part except the last must be at least 5 MiB;
+* every part except the last must be at least 5 MiB (the last may be smaller);
 * a multipart upload has at most 10 000 parts.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from dataclasses import dataclass
 
 __all__ = [
@@ -22,7 +21,6 @@ __all__ = [
     "MAX_SINGLE_COPY_BYTES",
     "MIN_PART_BYTES",
     "CopyPart",
-    "needs_multipart",
     "plan_copy_parts",
 ]
 
@@ -51,10 +49,6 @@ class CopyPart:
         return f"bytes={self.first_byte}-{self.last_byte}"
 
 
-def needs_multipart(size_bytes: int, *, threshold: int = MAX_SINGLE_COPY_BYTES) -> bool:
-    return size_bytes > threshold
-
-
 def plan_copy_parts(size_bytes: int, *, part_size: int) -> list[CopyPart]:
     """Split ``size_bytes`` into copy parts of at most ``part_size``.
 
@@ -73,19 +67,7 @@ def plan_copy_parts(size_bytes: int, *, part_size: int) -> list[CopyPart]:
         required = -(-size_bytes // MAX_PARTS)
         part_size = -(-required // (1024**2)) * 1024**2
 
-    return list(_parts(size_bytes, part_size))
-
-
-def _parts(size_bytes: int, part_size: int) -> Iterator[CopyPart]:
-    number = 1
-    offset = 0
-    while offset < size_bytes:
-        last = min(offset + part_size, size_bytes) - 1
-        remaining_after = size_bytes - (last + 1)
-        # Never leave a final part below the 5 MiB minimum: absorb it into this
-        # one instead. (The *last* part may be small; a middle part may not.)
-        if 0 < remaining_after < MIN_PART_BYTES:
-            last = size_bytes - 1
-        yield CopyPart(part_number=number, first_byte=offset, last_byte=last)
-        offset = last + 1
-        number += 1
+    return [
+        CopyPart(part_number=n, first_byte=first, last_byte=min(first + part_size, size_bytes) - 1)
+        for n, first in enumerate(range(0, size_bytes, part_size), start=1)
+    ]

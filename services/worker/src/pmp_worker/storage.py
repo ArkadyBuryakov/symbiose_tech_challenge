@@ -21,7 +21,7 @@ from pmp_common.pmtiles import HEADER_SIZE, InvalidPMTiles, PMTilesHeader, parse
 from pmp_common.s3 import IMMUTABLE_CACHE_CONTROL, PMTILES_CONTENT_TYPE, make_s3_client
 from pmp_common.tracing import SpanKind, traced
 
-from .multipart import needs_multipart, plan_copy_parts
+from .multipart import MAX_SINGLE_COPY_BYTES, plan_copy_parts
 
 if TYPE_CHECKING:  # pragma: no cover
     from types_boto3_s3.type_defs import CompletedPartTypeDef
@@ -136,7 +136,7 @@ class Storage:
                 log.info("worker.copy_skipped", target_key=target_key, reason="already present")
                 return
 
-            if needs_multipart(size_bytes, threshold=self._settings.multipart_threshold_bytes):
+            if size_bytes > MAX_SINGLE_COPY_BYTES:
                 self._multipart_copy(source_key, target_key, size_bytes)
             else:
                 self._single_copy(source_key, target_key)

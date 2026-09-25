@@ -21,19 +21,15 @@ from fastapi import APIRouter, Header, Path, Query, Response, status
 from pmp_common.enums import JobStatus, Visibility
 from pmp_common.logging import bind_log_context, get_logger
 from pmp_common.metrics import PUBLICATION_REQUESTS
-from pmp_common.problem import BadRequest, Conflict, Forbidden, NotFound
+from pmp_common.problem import Conflict, Forbidden, NotFound
 from pmp_common.s3 import staging_prefix
 from pmp_common.tracing import current_trace_id
 
 from .. import repository as repo
-from ..deps import Conn, Publisher, Settings
+from ..deps import Conn, Producer
 from ..identity import CurrentIdentity
-from ..schemas import (
-    CreatePublicationRequest,
-    JobResponse,
-    Page,
-    PublicationAccepted,
-)
+from ..publisher import emit_publication_requested
+from ..schemas import CreatePublicationRequest, JobResponse, Page, PublicationAccepted
 
 router = APIRouter(prefix="/publications", tags=["publications"])
 log = get_logger(__name__)
@@ -49,14 +45,6 @@ IdempotencyKey = Annotated[
 ]
 
 
-async def _to_job_response(conn: Conn, row: object) -> JobResponse:
-    mapping = dict(row._mapping)  # type: ignore[attr-defined]
-    mapping["result_version_seq"] = await repo.version_seq_for(
-        conn, mapping.get("result_version_id")
-    )
-    return JobResponse.model_validate(mapping)
-
-
 @router.post(
     "",
     status_code=status.HTTP_202_ACCEPTED,
@@ -68,7 +56,7 @@ async def create_publication(
     idempotency_key: IdempotencyKey,
     identity: CurrentIdentity,
     conn: Conn,
-    publisher: Publisher,
+    producer: Producer,
     response: Response,
 ) -> PublicationAccepted:
     tenant_id = identity.require_tenant()
@@ -102,7 +90,8 @@ async def create_publication(
         tenant_id=tenant_id,
         slug=body.dataset_slug,
         name=body.name or body.dataset_slug,
-        visibility=body.visibility or Visibility.PUBLIC,
+        # Private unless asked otherwise: publishing must never expose data by accident.
+        visibility=body.visibility or Visibility.PRIVATE,
     )
     job = await repo.create_job(
         conn,
@@ -119,17 +108,7 @@ async def create_publication(
     # Commit before producing: a lost message is recoverable by the reconciler,
     # a message pointing at an uncommitted job is not.
     await conn.commit()
-
-    await publisher.publication_requested(
-        tenant_id=tenant_id,
-        dataset_id=dataset.id,
-        dataset_slug=dataset.slug,
-        job_id=job.id,
-        source_key=body.source_key,
-        visibility=dataset.visibility,
-        requested_by=identity.user_id,
-        idempotency_key=idempotency_key,
-    )
+    await emit_publication_requested(producer, job=job, dataset=dataset)
 
     PUBLICATION_REQUESTS.labels("accepted").inc()
     response.headers["Location"] = f"/api/v1/publications/{job.id}"
@@ -140,31 +119,20 @@ async def create_publication(
 async def list_publications(
     identity: CurrentIdentity,
     conn: Conn,
-    settings: Settings,
     dataset_id: Annotated[UUID | None, Query()] = None,
     job_status: Annotated[JobStatus | None, Query(alias="status")] = None,
-    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[JobResponse]:
-    tenant_id = identity.require_tenant()
-    limit = min(limit, settings.max_page_size)
     rows = await repo.list_jobs(
         conn,
-        tenant_id=tenant_id,
+        tenant_id=identity.require_tenant(),
         dataset_id=dataset_id,
         status=job_status,
         limit=limit,
         offset=offset,
     )
-    total = await repo.count_jobs(
-        conn, tenant_id=tenant_id, dataset_id=dataset_id, status=job_status
-    )
-    return Page(
-        items=[await _to_job_response(conn, row) for row in rows],
-        total=total,
-        limit=limit,
-        offset=offset,
-    )
+    return Page(items=[JobResponse.model_validate(row) for row in rows], limit=limit, offset=offset)
 
 
 @router.get("/{job_id}", response_model=JobResponse, summary="Get one publication job")
@@ -176,7 +144,7 @@ async def get_publication(
     row = await repo.get_job(conn, job_id, tenant_id=identity.require_tenant())
     if row is None:
         raise NotFound(f"No publication job {job_id} for this tenant.")
-    return await _to_job_response(conn, row)
+    return JobResponse.model_validate(row)
 
 
 @router.post(
@@ -189,7 +157,7 @@ async def retry_publication(
     job_id: Annotated[UUID, Path()],
     identity: CurrentIdentity,
     conn: Conn,
-    publisher: Publisher,
+    producer: Producer,
 ) -> PublicationAccepted:
     """Re-queue a FAILED job.
 
@@ -199,36 +167,23 @@ async def retry_publication(
     """
     tenant_id = identity.require_tenant()
 
-    existing = await repo.get_job(conn, job_id, tenant_id=tenant_id)
-    if existing is None:
-        raise NotFound(f"No publication job {job_id} for this tenant.")
-    if existing.status != JobStatus.FAILED.value:
+    # The conditional UPDATE is the concurrency control; only on a miss do we
+    # read the job to tell "not found" from "not retryable".
+    job = await repo.mark_job_pending_for_retry(conn, job_id=job_id, tenant_id=tenant_id)
+    if job is None:
+        existing = await repo.get_job(conn, job_id, tenant_id=tenant_id)
+        if existing is None:
+            raise NotFound(f"No publication job {job_id} for this tenant.")
         raise Conflict(
             f"Only FAILED jobs can be retried; this job is {existing.status}.",
             code="job-not-retryable",
             current_status=existing.status,
         )
 
-    job = await repo.mark_job_pending_for_retry(conn, job_id=job_id, tenant_id=tenant_id)
-    if job is None:
-        # Lost the race with a concurrent retry.
-        raise Conflict("The job changed state while the retry was being applied.")
-
     dataset = await repo.get_dataset(conn, job.dataset_id, tenant_id=tenant_id)
-    if dataset is None:  # pragma: no cover - FK guarantees the dataset exists
-        raise BadRequest("The job's dataset no longer exists.")
-
+    assert dataset is not None  # FK: a job's dataset always exists
     await conn.commit()
+    await emit_publication_requested(producer, job=job, dataset=dataset)
 
-    await publisher.publication_requested(
-        tenant_id=tenant_id,
-        dataset_id=dataset.id,
-        dataset_slug=dataset.slug,
-        job_id=job.id,
-        source_key=job.source_key,
-        visibility=dataset.visibility,
-        requested_by=identity.user_id,
-        idempotency_key=job.idempotency_key,
-    )
-    log.info("publication.retried", job_id=str(job.id), attempts=job.attempts)
+    log.info("publication.retried", job_id=str(job.id))
     return PublicationAccepted(job_id=job.id, dataset_id=dataset.id, status=JobStatus.PENDING)

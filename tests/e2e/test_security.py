@@ -243,3 +243,64 @@ def test_12_a_sign_in_does_not_leak_to_other_callers(alice: Session) -> None:
     # And a signed-in caller still sees only themselves.
     me = alice.get("/api/auth/get-session").json()
     assert me["user"]["email"] == USERS["alice"][0]
+
+
+# --------------------------------------------------------------------------
+# Regressions from the security review
+# --------------------------------------------------------------------------
+def test_13_a_forged_api_key_tenant_grants_no_tenant_access(bob: Session) -> None:
+    """API-key metadata is client-writable. Bob (tenant-b) minting a key that
+    names tenant-a must not become a tenant-a caller."""
+    created = bob.post(
+        "/api/auth/api-key/create",
+        json={"name": f"e2e-forged-{time.time_ns()}", "metadata": {"tenant_id": "org_tenant-a"}},
+    )
+    assert created.status_code == 200, created.text
+    key = created.json()
+    try:
+        forged = httpx.Client(base_url=BASE_URL, headers={"x-api-key": key["key"]}, timeout=30)
+        # Authenticated, but acting as no tenant at all.
+        assert forged.get(f"{API}/publications").status_code == 403
+        assert forged.post(f"{API}/tiles/session").status_code == 403
+    finally:
+        bob.post("/api/auth/api-key/delete", json={"keyId": key["id"]})
+
+
+def test_13b_public_sign_up_is_disabled(anon: Session) -> None:
+    email = f"intruder-{time.time_ns()}@example.test"
+    response = anon.post(
+        "/api/auth/sign-up/email",
+        json={"email": email, "password": "a-long-enough-password", "name": "Intruder"},
+    )
+
+    assert 400 <= response.status_code < 500, response.text
+    signed_in = anon.post(
+        "/api/auth/sign-in/email", json={"email": email, "password": "a-long-enough-password"}
+    )
+    assert signed_in.status_code != 200
+
+
+def test_13c_an_encoded_dot_segment_cannot_cross_tenants_on_private_tiles(
+    alice: Session, bob: Session, slug: str, archive_v1: Archive
+) -> None:
+    """nginx routes on the normalised path; the verifier must check that same
+    path, not the raw one. Otherwise `/tiles/private/<bob's>/..%2F<alice's>/...`
+    is authorised against Bob's tenant and served from Alice's."""
+    job = alice.publish_and_wait(slug, archive_v1, visibility="private")
+    url = alice.current(job["dataset_id"])["url"]
+    rest = url.removeprefix("/tiles/private/org_tenant-a/")
+    assert bob.post(f"{API}/tiles/session").status_code == 200
+
+    traversal = f"/tiles/private/org_tenant-b/..%2Forg_tenant-a/{rest}"
+
+    assert tile_status(bob.http, traversal) == 403
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/v1/datasets/..%2Fadmin%2Fdatasets", "/api/v1/datasets/..%2Fpublications"],
+)
+def test_13d_dot_segments_cannot_switch_the_gateway_policy(anon: Session, path: str) -> None:
+    """The `optional` datasets rule must not become a way into routes with a
+    stricter policy once the upstream resolves the `..`."""
+    assert anon.get(f"{BASE_URL}{path}").status_code == 404

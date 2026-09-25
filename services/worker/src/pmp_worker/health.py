@@ -8,6 +8,7 @@ disproportionate dependency for three endpoints, so this is a thread running
 
 from __future__ import annotations
 
+import json
 import threading
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,12 +32,11 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = self.path.split("?", 1)[0]
         if path == "/healthz":
-            self._json(200, f'{{"status":"ok","service":"worker","version":"{self.version}"}}')
+            self._json(200, {"status": "ok", "service": "worker", "version": self.version})
         elif path == "/readyz":
             ok, detail = type(self).readiness()
             self._json(
-                200 if ok else 503,
-                f'{{"status":"{"ok" if ok else "unavailable"}","detail":"{detail}"}}',
+                200 if ok else 503, {"status": "ok" if ok else "unavailable", "detail": detail}
             )
         elif path == "/metrics":
             body = render_metrics()
@@ -46,10 +46,10 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         else:
-            self._json(404, '{"status":"not found"}')
+            self._json(404, {"status": "not found"})
 
-    def _json(self, status: int, body: str) -> None:
-        payload = body.encode()
+    def _json(self, status: int, body: dict[str, str]) -> None:
+        payload = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))

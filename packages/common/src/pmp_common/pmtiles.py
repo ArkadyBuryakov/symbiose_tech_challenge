@@ -26,13 +26,13 @@ __all__ = [
     "PMTILES_MAGIC",
     "InvalidPMTiles",
     "PMTilesHeader",
-    "UnsupportedPMTilesVersion",
     "parse_header",
 ]
 
 PMTILES_MAGIC: Final = b"PMTiles"
 HEADER_SIZE: Final = 127
 SUPPORTED_VERSION: Final = 3
+MAX_ZOOM: Final = 30
 
 _COMPRESSION: Final = {0: "unknown", 1: "none", 2: "gzip", 3: "brotli", 4: "zstd"}
 _TILE_TYPE: Final = {0: "unknown", 1: "mvt", 2: "png", 3: "jpeg", 4: "webp", 5: "avif"}
@@ -52,10 +52,6 @@ class InvalidPMTiles(ValueError):
     """The bytes are not a PMTiles archive (or are truncated)."""
 
 
-class UnsupportedPMTilesVersion(InvalidPMTiles):
-    """A PMTiles archive of a version this platform does not serve."""
-
-
 class PMTilesHeader(BaseModel):
     """The subset of the PMTiles header the platform stores and serves."""
 
@@ -66,13 +62,13 @@ class PMTilesHeader(BaseModel):
     tile_compression: str
     internal_compression: str
     clustered: bool
-    min_zoom: int = Field(ge=0, le=30)
-    max_zoom: int = Field(ge=0, le=30)
+    min_zoom: int
+    max_zoom: int
     bounds: tuple[float, float, float, float] = Field(
         description="[min_lon, min_lat, max_lon, max_lat] in WGS84 degrees."
     )
     center: tuple[float, float] = Field(description="[lon, lat] in WGS84 degrees.")
-    center_zoom: int = Field(ge=0, le=30)
+    center_zoom: int
     addressed_tiles: int
     tile_entries: int
     tile_contents: int
@@ -83,8 +79,7 @@ class PMTilesHeader(BaseModel):
 def parse_header(data: bytes) -> PMTilesHeader:
     """Parse the first :data:`HEADER_SIZE` bytes of a PMTiles archive.
 
-    Raises :class:`InvalidPMTiles` or :class:`UnsupportedPMTilesVersion`; both
-    are permanent failures for a publication job.
+    Raises :class:`InvalidPMTiles`, a permanent failure for a publication job.
     """
     if len(data) < HEADER_SIZE:
         raise InvalidPMTiles(f"need {HEADER_SIZE} header bytes, got {len(data)}")
@@ -93,7 +88,7 @@ def parse_header(data: bytes) -> PMTilesHeader:
     if magic != PMTILES_MAGIC:
         raise InvalidPMTiles(f"bad magic {magic!r}, expected {PMTILES_MAGIC!r}")
     if version != SUPPORTED_VERSION:
-        raise UnsupportedPMTilesVersion(
+        raise InvalidPMTiles(
             f"PMTiles version {version} is not supported (expected {SUPPORTED_VERSION})"
         )
 
@@ -113,6 +108,10 @@ def parse_header(data: bytes) -> PMTilesHeader:
     center_zoom = fields[23]
     center_lon, center_lat = fields[24:26]
 
+    if max_zoom > MAX_ZOOM or center_zoom > MAX_ZOOM:
+        raise InvalidPMTiles(
+            f"zoom above {MAX_ZOOM}: max_zoom={max_zoom}, center_zoom={center_zoom}"
+        )
     if min_zoom > max_zoom:
         raise InvalidPMTiles(f"min_zoom {min_zoom} is greater than max_zoom {max_zoom}")
 

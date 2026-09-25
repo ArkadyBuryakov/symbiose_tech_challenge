@@ -37,16 +37,13 @@ function resolutionOf(layerName) {
 }
 
 /**
- * The [min, max] this layer should be coloured against.
- * Prefers the per-resolution range, then the per-layer range, then the global one.
+ * The [min, max] this layer should be coloured against: the per-resolution
+ * range, else the global one.
  */
 export function rangeFor(spec, layerName) {
     const field = spec?.style?.color_field;
     const fallback = [spec?.style?.min ?? 0, spec?.style?.max ?? 1];
     if (!field) return fallback;
-
-    const byLayer = spec?.field_ranges_by_layer?.[layerName]?.[field];
-    if (isRange(byLayer)) return [byLayer.min, byLayer.max];
 
     const resolution = resolutionOf(layerName);
     const byResolution = resolution && spec?.field_ranges_by_resolution?.[resolution]?.[field];
@@ -78,31 +75,16 @@ export function colorExpression(field, [min, max]) {
     ];
 }
 
-/**
- * Turn a spec (plus, optionally, the archive's own vector_layers metadata) into
- * MapLibre layer definitions.
- */
-export function buildLayers(spec, { vectorLayers = [], headerMaxZoom = 22 } = {}) {
+/** Turn a spec's `layers` into MapLibre layer definitions (none without a spec). */
+export function buildLayers(spec) {
     const field = spec?.style?.color_field;
-    const declared = Array.isArray(spec?.layers) ? spec.layers : [];
-
-    // A spec without a `layers` array still renders: fall back to whatever the
-    // archive declares in its own metadata.
-    const entries = declared.length
-        ? declared
-        : vectorLayers.map((vl) => ({
-              layer: vl.id,
-              minzoom: vl.minzoom ?? 0,
-              maxzoom: vl.maxzoom ?? headerMaxZoom,
-              geometry: null,
-          }));
-
-    return entries.flatMap((entry) => layersFor(entry, spec, field, vectorLayers));
+    const entries = Array.isArray(spec?.layers) ? spec.layers : [];
+    return entries.flatMap((entry) => layersFor(entry, spec, field));
 }
 
-function layersFor(entry, spec, field, vectorLayers) {
+function layersFor(entry, spec, field) {
     const name = entry.layer;
-    const geometry = entry.geometry ?? guessGeometry(name, vectorLayers);
+    const geometry = entry.geometry ?? "polygon";
     const color = hasField(entry, field)
         ? colorExpression(field, rangeFor(spec, name))
         : POINT_COLOR;
@@ -170,13 +152,6 @@ function hasField(entry, field) {
     if (!field) return false;
     if (!Array.isArray(entry.columns)) return true;
     return entry.columns.some((c) => c.field === field);
-}
-
-function guessGeometry(name, vectorLayers) {
-    const declared = vectorLayers.find((vl) => vl.id === name);
-    if (declared?.geometry) return declared.geometry.toLowerCase();
-    // `centroids` in the reference dataset is the point layer.
-    return /centroid|point|tree/i.test(name) ? "point" : "polygon";
 }
 
 /** Popup labels for a layer: its own `columns` if it has them, else the global set. */

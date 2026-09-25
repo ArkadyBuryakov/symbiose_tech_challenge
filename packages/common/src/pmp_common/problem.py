@@ -8,24 +8,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
-
-__all__ = ["CONTENT_TYPE", "AppError", "Problem", "problem_dict"]
+__all__ = [
+    "CONTENT_TYPE",
+    "AppError",
+    "BadGateway",
+    "Conflict",
+    "Forbidden",
+    "GatewayTimeout",
+    "NotFound",
+    "Unauthorized",
+    "problem_dict",
+]
 
 CONTENT_TYPE = "application/problem+json"
 _BASE_TYPE = "https://pmtiles.platform/problems"
-
-
-class Problem(BaseModel):
-    """RFC 9457 problem detail. Extra members are allowed by the RFC."""
-
-    model_config = ConfigDict(extra="allow")
-
-    type: str = Field(default="about:blank", description="URI identifying the problem type.")
-    title: str = Field(description="Short, human-readable summary, stable per type.")
-    status: int = Field(ge=100, le=599)
-    detail: str | None = Field(default=None, description="Explanation specific to this occurrence.")
-    instance: str | None = Field(default=None, description="URI of this specific occurrence.")
 
 
 class AppError(Exception):
@@ -58,17 +54,6 @@ class AppError(Exception):
         self.extra = extra
         super().__init__(detail or self.title)
 
-    def to_problem(self, *, instance: str | None = None, request_id: str | None = None) -> Problem:
-        return Problem(
-            type=f"{_BASE_TYPE}/{self.code}",
-            title=self.title,
-            status=self.status,
-            detail=self.detail,
-            instance=instance,
-            request_id=request_id,
-            **self.extra,
-        )
-
 
 def problem_dict(
     *,
@@ -80,23 +65,20 @@ def problem_dict(
     request_id: str | None = None,
     **extra: Any,
 ) -> dict[str, Any]:
-    """Build a problem+json body without needing an exception instance."""
-    return Problem(
-        type=f"{_BASE_TYPE}/{code}",
-        title=title,
-        status=status,
-        detail=detail,
-        instance=instance,
-        request_id=request_id,
+    """RFC 9457 body; ``None`` members are omitted, extra members are allowed."""
+    body: dict[str, Any] = {
+        "type": f"{_BASE_TYPE}/{code}",
+        "title": title,
+        "status": status,
+        "detail": detail,
+        "instance": instance,
+        "request_id": request_id,
         **extra,
-    ).model_dump(exclude_none=True)
+    }
+    return {k: v for k, v in body.items() if v is not None}
 
 
 # --- common concrete errors -------------------------------------------------
-class BadRequest(AppError):
-    status, code, title = 400, "bad-request", "Bad Request"
-
-
 class Unauthorized(AppError):
     status, code, title = 401, "unauthorized", "Unauthorized"
 
@@ -113,35 +95,9 @@ class Conflict(AppError):
     status, code, title = 409, "conflict", "Conflict"
 
 
-class UnprocessableEntity(AppError):
-    status, code, title = 422, "unprocessable-entity", "Unprocessable Entity"
-
-
-class TooManyRequests(AppError):
-    status, code, title = 429, "too-many-requests", "Too Many Requests"
-
-
 class BadGateway(AppError):
     status, code, title = 502, "bad-gateway", "Bad Gateway"
 
 
-class ServiceUnavailable(AppError):
-    status, code, title = 503, "service-unavailable", "Service Unavailable"
-
-
 class GatewayTimeout(AppError):
     status, code, title = 504, "gateway-timeout", "Gateway Timeout"
-
-
-__all__ += [
-    "BadGateway",
-    "BadRequest",
-    "Conflict",
-    "Forbidden",
-    "GatewayTimeout",
-    "NotFound",
-    "ServiceUnavailable",
-    "TooManyRequests",
-    "Unauthorized",
-    "UnprocessableEntity",
-]

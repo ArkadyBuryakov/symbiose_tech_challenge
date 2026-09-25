@@ -6,7 +6,7 @@ Every log line carries ``service`` and, when available, ``request_id``,
 ``structlog.contextvars`` so call sites do not have to thread it through.
 
 Nothing secret is ever logged: presigned URLs, cookies, tokens and API keys
-must be redacted by the caller (see :func:`redact_url`).
+must never be passed to a logger.
 """
 
 from __future__ import annotations
@@ -16,19 +16,16 @@ import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
 import structlog
-from structlog.contextvars import bind_contextvars, clear_contextvars, unbind_contextvars
+from structlog.contextvars import bind_contextvars, unbind_contextvars
 from structlog.types import EventDict, Processor
 
 __all__ = [
     "bind_log_context",
-    "clear_log_context",
     "configure_logging",
     "get_logger",
     "log_context",
-    "redact_url",
 ]
 
 _NOISY_LOGGERS = (
@@ -62,6 +59,7 @@ def configure_logging(
     git_sha: str | None = None,
 ) -> None:
     """Configure structlog + stdlib logging for a service process."""
+    level = level.upper()
     shared: list[Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
@@ -82,9 +80,7 @@ def configure_logging(
             structlog.processors.format_exc_info,
             renderer,
         ],
-        wrapper_class=structlog.make_filtering_bound_logger(
-            logging.getLevelNamesMapping()[level.upper()]
-        ),
+        wrapper_class=structlog.make_filtering_bound_logger(logging.getLevelNamesMapping()[level]),
         logger_factory=structlog.PrintLoggerFactory(file=sys.stdout),
         cache_logger_on_first_use=True,
     )
@@ -99,7 +95,7 @@ def configure_logging(
     )
     root = logging.getLogger()
     root.handlers = [handler]
-    root.setLevel(level.upper())
+    root.setLevel(level)
     for noisy in _NOISY_LOGGERS:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
@@ -118,9 +114,6 @@ def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
     ``.bind()`` realises the logger immediately — module-level loggers are
     created at import time, before ``configure_logging`` has run.
     """
-    # Initial values are passed to ``get_logger`` rather than ``.bind()`` so the
-    # returned proxy stays lazy: module-level loggers created at import time
-    # must pick up the configuration installed later by ``configure_logging``.
     logger: structlog.stdlib.BoundLogger = (
         structlog.get_logger(module=name) if name else structlog.get_logger()
     )
@@ -132,10 +125,6 @@ def bind_log_context(**kwargs: Any) -> None:
     bind_contextvars(**{k: v for k, v in kwargs.items() if v is not None})
 
 
-def clear_log_context() -> None:
-    clear_contextvars()
-
-
 @contextmanager
 def log_context(**kwargs: Any) -> Iterator[None]:
     """Temporarily bind log context (used per Kafka message / per job)."""
@@ -145,9 +134,3 @@ def log_context(**kwargs: Any) -> Iterator[None]:
         yield
     finally:
         unbind_contextvars(*present)
-
-
-def redact_url(url: str) -> str:
-    """Drop the query string of a URL so presigned signatures never reach logs."""
-    parts = urlsplit(url)
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))

@@ -157,13 +157,14 @@ def test_another_tenant_s_objects_are_refused(
     """A valid tenant-a cookie must not open tenant-b's tiles."""
     cookies = signer.sign(TENANT_A, ttl_seconds=600).as_dict()
 
-    with pytest.raises(PolicyError, match="does not cover"):
+    with pytest.raises(PolicyError, match="does not cover") as refused:
         verifier.verify(
             policy_b64=cookies[COOKIE_POLICY],
             signature_b64=cookies[COOKIE_SIGNATURE],
             key_pair_id=cookies[COOKIE_KEY_PAIR_ID],
             url=f"{ORIGIN}/tiles/private/org_tenant-b/ds/sha/data.pmtiles",
         )
+    assert refused.value.reason == "out_of_scope"
 
 
 def test_a_tenant_whose_id_is_a_prefix_of_another_is_refused(

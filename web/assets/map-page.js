@@ -89,46 +89,34 @@ async function main() {
 
     // Private tiles are authorised by a signed cookie, not by the URL, so it
     // must be in place before MapLibre issues its first range request.
-    let refreshTimer = null;
     if (current.visibility === "private") {
         try {
-            refreshTimer = await startTileSession(datasetId);
+            await startTileSession();
         } catch (error) {
             return fail("Not permitted to view this private dataset.", error.message);
         }
     }
 
+    // The map is drawn from the spec published with this version.
+    const layers = buildLayers(current.spec);
+    if (layers.length === 0) {
+        return fail("This version has no layer spec to draw.");
+    }
+
     const protocol = new pmtiles.Protocol();
     maplibregl.addProtocol("pmtiles", protocol.tile);
 
-    const archive = new pmtiles.PMTiles(current.url);
-    protocol.add(archive);
-
-    let metadata = {};
-    try {
-        metadata = (await archive.getMetadata()) ?? {};
-    } catch (error) {
-        return fail("Could not read the tile archive.", error.message);
-    }
-
-    const vectorLayers = metadata.vector_layers ?? [];
-    const layers = buildLayers(current.spec, {
-        vectorLayers,
-        headerMaxZoom: current.pmtiles_header?.max_zoom ?? 22,
-    });
-    if (layers.length === 0) {
-        return fail("This archive declares no layers to draw.");
-    }
-
+    const header = current.pmtiles_header ?? {};
+    const maxZoom = header.max_zoom ?? 22;
     const map = new maplibregl.Map({
         container: "map",
         style: BASE_STYLE,
         // The header's own bounds are authoritative — no guessing, no extra request.
-        bounds: current.pmtiles_header?.bounds,
+        bounds: header.bounds,
         fitBoundsOptions: { padding: 40 },
         // Capped at the archive's own max zoom: the spec's zoom windows end
         // there, so zooming further would show an empty map.
-        maxZoom: current.pmtiles_header?.max_zoom ?? 22,
+        maxZoom,
         attributionControl: { compact: false },
     });
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
@@ -138,9 +126,9 @@ async function main() {
         map.addSource(SOURCE_ID, {
             type: "vector",
             url: `pmtiles://${current.url}`,
-            ...(current.pmtiles_header?.bounds ? { bounds: current.pmtiles_header.bounds } : {}),
-            minzoom: current.pmtiles_header?.min_zoom ?? 0,
-            maxzoom: current.pmtiles_header?.max_zoom ?? 14,
+            ...(header.bounds ? { bounds: header.bounds } : {}),
+            minzoom: header.min_zoom ?? 0,
+            maxzoom: maxZoom,
         });
         for (const layer of layers) map.addLayer(layer);
 
@@ -153,15 +141,13 @@ async function main() {
         // A tile 403 here almost always means the signed cookie expired.
         console.error("[map]", event.error);
     });
-
-    window.addEventListener("beforeunload", () => clearInterval(refreshTimer));
 }
 
 /** Fetch signed tile cookies now, and keep refreshing them before they expire. */
-async function startTileSession(datasetId) {
+async function startTileSession() {
     const session = await api.createTileSession();
     const refreshMs = Math.max((session.expires_in ?? 600) * 1000 * 0.6, 30_000);
-    return setInterval(() => {
+    setInterval(() => {
         api.createTileSession().catch((error) =>
             console.error("[tiles] cookie refresh failed", error),
         );
@@ -179,7 +165,7 @@ function renderPanel(dataset, current, layers) {
         ["Visibility", dataset.visibility],
         ["Size", formatBytes(current.size_bytes)],
         ["Zooms", `${header.min_zoom ?? "?"}–${header.max_zoom ?? "?"}`],
-        ["Layers", layers.filter((l) => l.type !== "line").length],
+        ["Layers", interactiveLayerIds(layers).length],
         ["Content", current.sha256.slice(0, 12) + "…"],
     ];
 

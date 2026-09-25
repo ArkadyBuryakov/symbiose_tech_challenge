@@ -16,18 +16,16 @@ cookie, because this endpoint sits behind the gateway's identity check.
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from fastapi import APIRouter, Request, Response
-from pydantic import BaseModel, Field
 
 from pmp_common.cloudfront import CloudFrontSigner
 from pmp_common.logging import get_logger
 
 from ..deps import Settings
 from ..identity import TenantOrPlatformAdmin
+from ..schemas import TileSession
 
-__all__ = ["COOKIE_PATH", "TileSession", "router"]
+__all__ = ["COOKIE_PATH", "router"]
 
 router = APIRouter(prefix="/tiles", tags=["tiles"])
 log = get_logger(__name__)
@@ -35,12 +33,6 @@ log = get_logger(__name__)
 # The cookies are only ever needed on private tile requests; scoping their path
 # keeps them off every API call and static asset.
 COOKIE_PATH = "/tiles/private/"
-
-
-class TileSession(BaseModel):
-    resource: str = Field(description="The CloudFront resource pattern the cookies grant.")
-    expires_at: datetime
-    expires_in: int = Field(description="Seconds until the cookies expire.")
 
 
 def _signer(request: Request) -> CloudFrontSigner:

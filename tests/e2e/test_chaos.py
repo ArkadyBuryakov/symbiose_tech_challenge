@@ -9,9 +9,9 @@ import time
 
 import pytest
 
-from .conftest import REPO_ROOT, Archive, Session, compose, inside
+from pmp_common.kafka import TOPIC_REQUESTED as TOPIC
 
-TOPIC = "publication.requested"
+from .conftest import REPO_ROOT, Archive, Session, compose, inside
 
 
 def test_5_a_duplicate_kafka_message_creates_one_version(

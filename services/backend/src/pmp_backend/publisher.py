@@ -15,68 +15,48 @@ commit first.
 
 from __future__ import annotations
 
-from uuid import UUID
+from typing import Any
+
+from structlog.contextvars import get_contextvars
 
 from pmp_common.enums import Visibility
 from pmp_common.events import PublicationRequested, encode_event
-from pmp_common.kafka import AsyncProducer, DeliveryError
+from pmp_common.kafka import TOPIC_REQUESTED, AsyncProducer
 from pmp_common.logging import get_logger
 from pmp_common.tracing import merge_headers
 
-__all__ = ["PublicationPublisher"]
+__all__ = ["emit_publication_requested"]
 
 log = get_logger(__name__)
 
 
-class PublicationPublisher:
-    """Thin domain wrapper over the Kafka producer."""
-
-    def __init__(self, producer: AsyncProducer, *, topic: str) -> None:
-        self._producer = producer
-        self._topic = topic
-
-    async def publication_requested(
-        self,
-        *,
-        tenant_id: str,
-        dataset_id: UUID,
-        dataset_slug: str,
-        job_id: UUID,
-        source_key: str,
-        visibility: Visibility,
-        requested_by: str,
-        idempotency_key: str,
-        request_id: str | None = None,
-    ) -> bool:
-        """Emit the request. Returns False if delivery failed (job stays PENDING)."""
-        event = PublicationRequested(
-            tenant_id=tenant_id,
-            dataset_id=dataset_id,
-            job_id=job_id,
-            dataset_slug=dataset_slug,
-            source_key=source_key,
-            visibility=visibility,
-            requested_by=requested_by,
-            idempotency_key=idempotency_key,
+async def emit_publication_requested(producer: AsyncProducer, *, job: Any, dataset: Any) -> None:
+    """Emit the request for a committed job. Failures only log: the job stays
+    PENDING and the reconciler re-emits it."""
+    event = PublicationRequested(
+        tenant_id=job.tenant_id,
+        dataset_id=job.dataset_id,
+        job_id=job.id,
+        source_key=job.source_key,
+        visibility=Visibility(dataset.visibility),
+    )
+    request_id = get_contextvars().get("request_id")
+    try:
+        await producer.produce(
+            TOPIC_REQUESTED,
+            # Partitioning by dataset keeps all work for one dataset in order
+            # and on one consumer, so the per-dataset row lock in the worker is
+            # uncontended.
+            key=str(job.dataset_id),
+            value=encode_event(event),
+            headers=merge_headers({"x-request-id": request_id}),
         )
-        try:
-            await self._producer.produce(
-                self._topic,
-                # Partitioning by dataset keeps all work for one dataset in
-                # order and on one consumer, so the per-dataset row lock in the
-                # worker is uncontended.
-                key=str(dataset_id),
-                value=encode_event(event),
-                headers=merge_headers({"x-request-id": request_id}),
-            )
-        except DeliveryError as exc:
-            log.warning(
-                "publication.produce_failed",
-                job_id=str(job_id),
-                dataset_id=str(dataset_id),
-                error=str(exc),
-                recovery="reconciler will re-emit this PENDING job",
-            )
-            return False
-        log.info("publication.requested", job_id=str(job_id), dataset_id=str(dataset_id))
-        return True
+    except Exception as exc:  # DeliveryError, BufferError, KafkaException
+        log.warning(
+            "publication.produce_failed",
+            job_id=str(job.id),
+            error=str(exc),
+            recovery="reconciler will re-emit this PENDING job",
+        )
+        return
+    log.info("publication.requested", job_id=str(job.id), dataset_id=str(job.dataset_id))

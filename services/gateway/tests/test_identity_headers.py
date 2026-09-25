@@ -5,30 +5,52 @@ from __future__ import annotations
 import httpx
 import pytest
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 from httpx import ASGITransport
 
-from pmp_gateway.app import StripIdentityHeadersMiddleware
+from pmp_gateway.proxy import proxy_request
+
+
+class _Stream(httpx.AsyncByteStream):
+    async def __aiter__(self):  # type: ignore[no-untyped-def]
+        yield b""
 
 
 @pytest.fixture
-def app() -> FastAPI:
+def seen() -> list[httpx.Request]:
+    return []
+
+
+@pytest.fixture
+def app(seen: list[httpx.Request]) -> FastAPI:
+    def upstream(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, stream=_Stream())
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
     application = FastAPI()
-    application.add_middleware(StripIdentityHeadersMiddleware)
 
     @application.get("/echo")
-    async def echo(request: Request) -> JSONResponse:
-        return JSONResponse({"headers": sorted(k.lower() for k in request.headers)})
+    async def echo(request: Request) -> Response:
+        return await proxy_request(
+            request,
+            client=client,
+            target_url="http://upstream/echo",
+            internal_token=None,
+            request_id="r",
+        )
 
     return application
 
 
-async def seen_headers(app: FastAPI, headers: dict[str, str]) -> set[str]:
+async def seen_headers(
+    app: FastAPI, seen: list[httpx.Request], headers: dict[str, str]
+) -> set[str]:
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://gateway"
     ) as client:
-        response = await client.get("/echo", headers=headers)
-    return set(response.json()["headers"])
+        await client.get("/echo", headers=headers)
+    return {k.lower() for k in seen[-1].headers}
 
 
 @pytest.mark.parametrize(
@@ -46,36 +68,22 @@ async def seen_headers(app: FastAPI, headers: dict[str, str]) -> set[str]:
         "x-internal-secret",
     ],
 )
-async def test_identity_headers_are_stripped(app: FastAPI, header: str) -> None:
-    seen = await seen_headers(app, {header: "attacker-controlled"})
-
-    assert header not in seen
+async def test_identity_headers_are_stripped(app, seen, header: str) -> None:  # type: ignore[no-untyped-def]
+    assert header not in await seen_headers(app, seen, {header: "attacker-controlled"})
 
 
-async def test_ordinary_headers_are_left_alone(app: FastAPI) -> None:
-    seen = await seen_headers(
+async def test_ordinary_headers_are_left_alone(app, seen) -> None:  # type: ignore[no-untyped-def]
+    forwarded = await seen_headers(
         app,
-        {
-            "x-request-id": "abc",
-            "x-api-key": "pmp_key",
-            "content-type": "application/json",
-            "x-forwarded-for": "203.0.113.1",
-        },
+        seen,
+        {"x-api-key": "pmp_key", "content-type": "application/json", "accept": "text/plain"},
     )
 
-    assert {"x-request-id", "x-api-key", "content-type", "x-forwarded-for"} <= seen
+    assert {"x-api-key", "content-type", "accept"} <= forwarded
 
 
-async def test_stripping_is_case_insensitive(app: FastAPI) -> None:
-    seen = await seen_headers(app, {"X-Tenant-Id": "org_other"})
-
-    assert "x-tenant-id" not in seen
-
-
-async def test_a_request_with_no_identity_headers_is_unchanged(app: FastAPI) -> None:
-    seen = await seen_headers(app, {"accept": "application/json"})
-
-    assert "accept" in seen
+async def test_stripping_is_case_insensitive(app, seen) -> None:  # type: ignore[no-untyped-def]
+    assert "x-tenant-id" not in await seen_headers(app, seen, {"X-Tenant-Id": "org_other"})
 
 
 # --------------------------------------------------------------------------
@@ -110,7 +118,7 @@ def test_a_forged_x_forwarded_for_does_not_change_the_bucket() -> None:
     a = _request({"x-real-ip": "203.0.113.9", "x-forwarded-for": "1.1.1.1, 203.0.113.9"})
     b = _request({"x-real-ip": "203.0.113.9", "x-forwarded-for": "2.2.2.2, 203.0.113.9"})
 
-    assert _bucket_key(a, None, "read") == _bucket_key(b, None, "read")  # type: ignore[arg-type]
+    assert _bucket_key(a, None) == _bucket_key(b, None)  # type: ignore[arg-type]
 
 
 def test_client_ip_falls_back_to_the_socket_peer() -> None:

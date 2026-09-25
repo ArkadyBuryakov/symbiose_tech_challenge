@@ -31,7 +31,6 @@ from dataclasses import dataclass
 import httpx
 from prometheus_client import Counter
 
-from pmp_common.enums import TenantRole
 from pmp_common.identity import Identity
 from pmp_common.logging import get_logger
 
@@ -52,6 +51,7 @@ VERIFY_CALLS = Counter(
 
 SESSION_COOKIE_PREFIX = "better-auth"
 API_KEY_HEADER = "x-api-key"
+VERIFY_TIMEOUT_SECONDS = 3.0
 
 
 class VerificationError(Exception):
@@ -67,7 +67,7 @@ class _Entry:
 class VerifyCache:
     """Bounded, TTL'd LRU of successful verifications."""
 
-    def __init__(self, *, ttl_seconds: float, max_entries: int) -> None:
+    def __init__(self, *, ttl_seconds: float, max_entries: int = 10_000) -> None:
         self._ttl = ttl_seconds
         self._max = max_entries
         self._entries: OrderedDict[str, _Entry] = OrderedDict()
@@ -99,9 +99,6 @@ class VerifyCache:
         while len(self._entries) > self._max:
             self._entries.popitem(last=False)
 
-    def clear(self) -> None:
-        self._entries.clear()
-
     def __len__(self) -> int:
         return len(self._entries)
 
@@ -115,12 +112,10 @@ class Verifier:
         *,
         auth_base_url: str,
         cache: VerifyCache,
-        timeout_seconds: float,
     ) -> None:
         self._client = client
-        self._url = f"{auth_base_url.rstrip('/')}/internal/verify"
+        self._base_url = auth_base_url.rstrip("/")
         self._cache = cache
-        self._timeout = timeout_seconds
 
     async def verify(
         self,
@@ -155,7 +150,11 @@ class Verifier:
             headers["cookie"] = cookie_header
 
         try:
-            response = await self._client.get(self._url, headers=headers, timeout=self._timeout)
+            response = await self._client.get(
+                f"{self._base_url}/internal/verify",
+                headers=headers,
+                timeout=VERIFY_TIMEOUT_SECONDS,
+            )
         except httpx.HTTPError as exc:
             VERIFY_CALLS.labels("error").inc()
             raise VerificationError(f"auth service unreachable: {exc}") from exc
@@ -170,7 +169,7 @@ class Verifier:
                 f"auth service returned {response.status_code} from /internal/verify"
             )
 
-        identity = _identity_from(response.json())
+        identity = Identity.model_validate(response.json())
         VERIFY_CALLS.labels("ok").inc()
         self._cache.put(cache_key, identity)
         return identity
@@ -178,19 +177,8 @@ class Verifier:
     async def healthy(self) -> bool:
         try:
             response = await self._client.get(
-                self._url.replace("/internal/verify", "/healthz"), timeout=self._timeout
+                f"{self._base_url}/healthz", timeout=VERIFY_TIMEOUT_SECONDS
             )
         except httpx.HTTPError:
             return False
         return response.status_code == 200
-
-
-def _identity_from(payload: dict[str, object]) -> Identity:
-    role = payload.get("tenant_role")
-    return Identity(
-        user_id=str(payload["user_id"]),
-        tenant_id=str(payload["tenant_id"]) if payload.get("tenant_id") else None,
-        tenant_role=TenantRole(str(role)) if role else None,
-        platform_role=str(payload["platform_role"]) if payload.get("platform_role") else None,
-        auth_method="api_key" if payload.get("auth_method") == "api_key" else "session",
-    )

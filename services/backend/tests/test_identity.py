@@ -17,7 +17,7 @@ from pmp_backend.identity import (
     PlatformAdmin,
     TenantAdmin,
     TenantOrPlatformAdmin,
-    build_identity_resolver,
+    build_token_verifier,
 )
 from pmp_backend.settings import BackendSettings
 from pmp_common.enums import TenantRole
@@ -42,11 +42,10 @@ def keypair(tmp_path_factory: pytest.TempPathFactory) -> KeyPair:
 def app(keypair: KeyPair, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setenv("DB_PASSWORD", "unused")
     monkeypatch.setenv("INTERNAL_JWT_PUBLIC_KEY_PATH", str(keypair[1]))
-    monkeypatch.setenv("BACKEND_AUTH_MODE", "internal_jwt")
     settings = BackendSettings()
 
     application = create_app(title="t", service="backend-test")
-    application.state.identity_resolver = build_identity_resolver(settings)
+    application.state.token_verifier = build_token_verifier(settings)
 
     @application.get("/optional")
     async def optional(identity: OptionalIdentity) -> dict[str, str | None]:
@@ -161,12 +160,3 @@ async def test_platform_admin_without_a_tenant_is_admitted_where_scope_depends_o
     assert (await get(app, "/tenant-or-admin", token(keypair[0], ADMIN))).status_code == 200
     assert (await get(app, "/tenant-or-admin", token(keypair[0], OWNER))).status_code == 200
     assert (await get(app, "/tenant-or-admin", token(keypair[0], ORPHAN))).status_code == 403
-
-
-def test_dev_stub_mode_refuses_to_start_outside_local(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DB_PASSWORD", "unused")
-    monkeypatch.setenv("BACKEND_AUTH_MODE", "dev_stub")
-    monkeypatch.setenv("ENVIRONMENT", "prod")
-
-    with pytest.raises(ValueError, match="dev_stub is only allowed"):
-        BackendSettings()

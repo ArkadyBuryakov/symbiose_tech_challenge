@@ -3,7 +3,12 @@
 Bodies are streamed in both directions, so uploading a multi-gigabyte archive
 through the gateway costs a buffer, not a copy of the file.
 
-Two details matter more than they look:
+Three details matter more than they look:
+
+* **Client-supplied identity headers are dropped** (``x-user-*``,
+  ``x-tenant-*``, ``x-internal-*``, ``x-platform-*`` and friends), and so is
+  the caller's ``Authorization`` on every non-public route. Identity enters the
+  system at exactly one place: the internal token minted here.
 
 * **Hop-by-hop headers are removed** in both directions (RFC 9110 §7.6.1).
   Forwarding ``Connection`` or ``Transfer-Encoding`` to a different connection
@@ -25,7 +30,7 @@ from fastapi.responses import StreamingResponse
 from pmp_common.logging import get_logger
 from pmp_common.problem import BadGateway, GatewayTimeout
 
-__all__ = ["HOP_BY_HOP_HEADERS", "proxy_request"]
+__all__ = ["HOP_BY_HOP_HEADERS", "is_spoofable", "proxy_request"]
 
 log = get_logger(__name__)
 
@@ -43,6 +48,17 @@ HOP_BY_HOP_HEADERS = frozenset(
     }
 )
 
+# Headers a client must never be able to set, because something downstream
+# might believe them.
+_SPOOFABLE_PREFIXES = ("x-user-", "x-tenant-", "x-internal-", "x-platform-")
+_SPOOFABLE = frozenset({"x-auth-method", "x-gateway-identity"})
+
+
+def is_spoofable(name: str) -> bool:
+    lowered = name.lower()
+    return lowered in _SPOOFABLE or lowered.startswith(_SPOOFABLE_PREFIXES)
+
+
 # Headers the gateway itself owns on the way out; whatever the client sent is
 # replaced, never appended to.
 _GATEWAY_OWNED = frozenset(
@@ -59,18 +75,22 @@ _GATEWAY_OWNED = frozenset(
 
 
 def _outbound_headers(
-    request: Request, *, internal_token: str | None, request_id: str
+    request: Request,
+    *,
+    internal_token: str | None,
+    strip_authorization: bool,
+    request_id: str,
 ) -> list[tuple[str, str]]:
     headers: list[tuple[str, str]] = []
     for name, value in request.headers.items():
         lowered = name.lower()
         if lowered in HOP_BY_HOP_HEADERS or lowered in _GATEWAY_OWNED:
             continue
-        if lowered.startswith("proxy-"):
+        if lowered.startswith("proxy-") or is_spoofable(lowered):
             continue
-        if internal_token is not None and lowered == "authorization":
-            # Replaced below by the internal token; a client-supplied
-            # Authorization header must never reach an upstream that trusts it.
+        if strip_authorization and lowered == "authorization":
+            # Only the internal token (added below) may reach an upstream that
+            # trusts this header — anonymous callers on `optional` routes too.
             continue
         headers.append((name, value))
 
@@ -103,12 +123,22 @@ async def proxy_request(
     target_url: str,
     internal_token: str | None,
     request_id: str,
+    strip_authorization: bool = True,
 ) -> StreamingResponse:
-    """Forward ``request`` to ``target_url`` and stream the response back."""
+    """Forward ``request`` to ``target_url`` and stream the response back.
+
+    ``strip_authorization`` is False only for ``public`` pass-through routes,
+    where the caller's own ``Authorization`` belongs to the upstream.
+    """
     upstream_request = client.build_request(
         method=request.method,
         url=target_url,
-        headers=_outbound_headers(request, internal_token=internal_token, request_id=request_id),
+        headers=_outbound_headers(
+            request,
+            internal_token=internal_token,
+            strip_authorization=strip_authorization,
+            request_id=request_id,
+        ),
         content=request.stream(),
     )
 

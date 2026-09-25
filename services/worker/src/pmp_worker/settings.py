@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import socket
 
-from pydantic import Field, model_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pmp_common.config import DbSettings, KafkaSettings, S3Settings, ServiceSettings
@@ -63,7 +63,8 @@ class WorkerSettings(ServiceSettings):
         description=(
             "How long a claim is trusted without a heartbeat. Kept short because "
             "LeaseHeartbeat renews it while the job runs, so this is only the "
-            "delay before a *dead* worker's job is recovered."
+            "delay before a *dead* worker's job is recovered. (KAFKA_MAX_POLL_INTERVAL_MS "
+            "must instead exceed the longest job including its retry backoffs.)"
         ),
     )
     max_attempts: int = Field(default=5, ge=1, le=50, validation_alias="WORKER_MAX_ATTEMPTS")
@@ -97,18 +98,6 @@ class WorkerSettings(ServiceSettings):
     reconciler_batch: int = Field(
         default=50, ge=1, le=500, validation_alias="WORKER_RECONCILER_BATCH"
     )
-
-    @model_validator(mode="after")
-    def _lease_must_outlive_a_job(self) -> WorkerSettings:
-        # If the Kafka poll interval were shorter than the lease, the broker
-        # would rebalance a partition away mid-job while the lease still said
-        # the job was owned.
-        if self.kafka.max_poll_interval_ms / 1000 < self.lease_seconds:
-            raise ValueError(
-                "KAFKA_MAX_POLL_INTERVAL_MS must be at least WORKER_LEASE_SECONDS "
-                f"({self.kafka.max_poll_interval_ms}ms < {self.lease_seconds}s)"
-            )
-        return self
 
 
 def get_settings() -> WorkerSettings:

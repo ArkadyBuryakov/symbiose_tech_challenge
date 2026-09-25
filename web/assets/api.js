@@ -119,6 +119,16 @@ export function formatTime(iso) {
     });
 }
 
+/** Show (or clear, with an empty message) a notice inside `container`. */
+export function notify(container, message, kind = "info") {
+    container.innerHTML = "";
+    if (!message) return;
+    const div = document.createElement("div");
+    div.className = kind === "error" ? "notice error" : "notice";
+    div.textContent = message;
+    container.appendChild(div);
+}
+
 export function pill(value) {
     const span = document.createElement("span");
     span.className = `pill pill-${value}`;

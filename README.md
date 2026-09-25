@@ -59,7 +59,7 @@ the job and writes the result event to an outbox. The map then asks
 ## Prerequisites
 
 * Docker with Compose v2 (tested with Docker 29, Compose 5)
-* GNU Make, `curl`, `python3` (for the demo and chaos scripts); `jq` is handy for
+* GNU Make, `curl`, `python3` (for the demo script); `jq` is handy for
   the manual checks below but not required
 * For development only: [`uv`](https://docs.astral.sh/uv/) and Node 22+
 
@@ -69,9 +69,16 @@ Nothing else is installed on the host; every service runs in a container.
 
 ```bash
 make up      # build and start everything; waits until healthy (~2 min first time)
-make seed    # create demo tenants, users and a producer API key (prints them)
-make demo    # stage, publish, wait, verify a 206, print the map URL
+make seed    # demo tenants and users; producer API key -> dev-keys/producer-api-key
+make demo    # as the tenant-a producer: stage, publish, wait, verify a 206, print the map URL
 ```
+
+> **Upgrading an existing checkout:** the catalogue migrations were folded into
+> one, so a database created by an earlier version will not migrate. Run
+> `make clean` (drops the local volumes and dev keys) before `make up`.
+
+New datasets are **private** unless the publication request says
+`"visibility": "public"`; `make demo` publishes publicly by default.
 
 Then open **http://localhost:8080** and sign in:
 
@@ -116,7 +123,6 @@ make synthetic    # sample-data/synthetic.pmtiles
 
 ```bash
 VISIBILITY=private make demo           # publish a private dataset
-DEMO_API_KEY=pmp_... make demo         # authenticate as the producer, not as Alice
 make up PROFILE=observability          # + Prometheus, Grafana, Jaeger
 make up PROFILE=debug                  # + host ports for postgres, kafka, s3, gateway, auth, backend, worker
 ```
@@ -124,7 +130,7 @@ make up PROFILE=debug                  # + host ports for postgres, kafka, s3, g
 | URL | What |
 |---|---|
 | http://localhost:8080 | Datasets, sign-in, versions, jobs |
-| http://localhost:8080/upload.html | Browser upload (presigned PUT through the edge) |
+| http://localhost:8080/upload.html | Browser upload (presigned PUT through the edge; only when `DEMO_UPLOAD_ENABLED=true`) |
 | http://localhost:8080/map.html?dataset=… | The map |
 | http://localhost:8081 | Redpanda Console (topics, messages, consumer lag) |
 | http://localhost:3001 | Grafana (`observability` profile) |
@@ -172,7 +178,8 @@ make chaos-duplicate          # replay a publication message verbatim → still 
 make chaos-crash-after-copy   # kill the worker between the S3 copy and the DB commit
 ```
 
-`chaos-crash-after-copy` restarts the worker with `CHAOS_CRASH_AFTER_COPY=1`,
+Both run the matching e2e test (`tests/e2e/test_chaos.py`), so they need
+`make up && make seed` first. `chaos-crash-after-copy` restarts the worker with `CHAOS_CRASH_AFTER_COPY=1`,
 publishes, waits for it to die, restarts it normally, and checks that the
 reconciler recovered the job to the **same** content hash as **one** version row
 — the second attempt skips the copy because the object is already in place.
@@ -211,7 +218,7 @@ services/edge/       nginx config                        (CloudFront stand-in)
 web/                 static pages, no build step
 migrations/          Alembic, `catalog` schema
 ops/                 DB roles/grants, init scripts, Dockerfiles, observability
-scripts/             demo, chaos, key generation, synthetic data
+scripts/             demo, key generation, synthetic data, event schemas
 tests/e2e/           end-to-end suite
 docs/                decisions, AWS mapping, runbook, event schemas
 ```

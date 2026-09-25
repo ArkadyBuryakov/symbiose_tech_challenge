@@ -19,7 +19,7 @@ from typing import Any
 
 import yaml
 
-__all__ = ["AuthPolicy", "Route", "RouteTable", "load_route_table"]
+__all__ = ["AuthPolicy", "RateClass", "Route", "RouteTable", "load_route_table"]
 
 
 class AuthPolicy(StrEnum):
@@ -39,13 +39,18 @@ class AuthPolicy(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class RateClass:
+    rps: float
+    burst: int
+
+
+@dataclass(frozen=True, slots=True)
 class Route:
     prefix: str
     upstream: str
     policy: AuthPolicy
+    rate_limit: str
     methods: frozenset[str] | None = None
-    rate_limit: str = "default"
-    strip_prefix: bool = False
 
     def matches(self, path: str, method: str) -> bool:
         if not path.startswith(self.prefix):
@@ -56,16 +61,14 @@ class Route:
 @dataclass(frozen=True, slots=True)
 class RouteTable:
     routes: tuple[Route, ...]
+    rate_limits: dict[str, RateClass]
 
     def match(self, path: str, method: str) -> Route | None:
         """Longest matching prefix wins; ``None`` means 404."""
-        for route in self.routes:
-            if route.matches(path, method):
-                return route
-        return None
+        return next((r for r in self.routes if r.matches(path, method)), None)
 
 
-def _parse_route(raw: dict[str, Any], index: int) -> Route:
+def _parse_route(raw: dict[str, Any], index: int, rate_limits: dict[str, RateClass]) -> Route:
     where = f"routes[{index}]"
     try:
         prefix = str(raw["prefix"])
@@ -78,29 +81,41 @@ def _parse_route(raw: dict[str, Any], index: int) -> Route:
 
     if not prefix.startswith("/"):
         raise ValueError(f"{where}: prefix must start with '/' (got {prefix!r})")
+    rate_limit = str(raw.get("rate_limit", "default"))
+    if rate_limit not in rate_limits:
+        raise ValueError(f"{where}: unknown rate_limit class {rate_limit!r}")
 
     methods = raw.get("methods")
     return Route(
         prefix=prefix,
         upstream=upstream,
         policy=policy,
+        rate_limit=rate_limit,
         methods=frozenset(m.upper() for m in methods) if methods else None,
-        rate_limit=str(raw.get("rate_limit", "default")),
-        strip_prefix=bool(raw.get("strip_prefix", False)),
     )
 
 
 def load_route_table(path: str | Path) -> RouteTable:
     """Load and validate the route table, failing fast on anything malformed."""
-    content = Path(path).read_text(encoding="utf-8")
-    document = yaml.safe_load(content) or {}
+    document = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+
+    raw_classes = document.get("rate_limits")
+    if not isinstance(raw_classes, dict) or not raw_classes:
+        raise ValueError(f"{path}: 'rate_limits' must be a non-empty mapping")
+    try:
+        rate_limits = {
+            str(name): RateClass(rps=float(c["rps"]), burst=int(c["burst"]))
+            for name, c in raw_classes.items()
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"{path}: each rate_limits class needs numeric rps and burst") from exc
+
     raw_routes = document.get("routes")
     if not isinstance(raw_routes, list) or not raw_routes:
         raise ValueError(f"{path}: 'routes' must be a non-empty list")
-
-    routes = [_parse_route(raw, index) for index, raw in enumerate(raw_routes)]
+    routes = [_parse_route(raw, i, rate_limits) for i, raw in enumerate(raw_routes)]
 
     # Sorting here rather than trusting the file means a reviewer cannot
     # accidentally shadow `/api/v1/admin/` by putting `/api/v1/` above it.
     routes.sort(key=lambda r: (-len(r.prefix), r.prefix))
-    return RouteTable(routes=tuple(routes))
+    return RouteTable(routes=tuple(routes), rate_limits=rate_limits)

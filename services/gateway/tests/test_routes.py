@@ -68,7 +68,6 @@ def test_writing_to_a_dataset_is_not_optional_auth(table) -> None:  # type: igno
         "/api",
         "/api/v2/datasets",
         "/tiles/public/x/y/z/data.pmtiles",
-        "/../api/v1/datasets",
     ],
 )
 def test_everything_not_explicitly_routed_is_a_404(table, path) -> None:  # type: ignore[no-untyped-def]
@@ -76,23 +75,70 @@ def test_everything_not_explicitly_routed_is_a_404(table, path) -> None:  # type
     assert table.match(path, "GET") is None
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        # Matches the `optional` datasets rule by prefix, but httpx resolves it
+        # to /api/v1/admin/... upstream: the matcher and the upstream disagree.
+        "/api/v1/datasets/../admin/datasets",
+        "/api/v1/datasets/./x",
+        "/api/v1/..",
+    ],
+)
+def test_dot_segment_paths_are_refused_before_matching(path: str) -> None:
+    from pmp_gateway.app import _has_dot_segment
+
+    assert _has_dot_segment(path)
+
+
+def test_ordinary_paths_have_no_dot_segments() -> None:
+    from pmp_gateway.app import _has_dot_segment
+
+    assert not _has_dot_segment("/api/v1/datasets/abc/current")
+    assert not _has_dot_segment("/api/v1/datasets/a..b/v.1")
+
+
+def test_every_route_has_a_rate_class_with_its_own_rate(table) -> None:  # type: ignore[no-untyped-def]
+    for route in table.routes:
+        rate = table.rate_limits[route.rate_limit]
+        assert rate.rps > 0
+        assert rate.burst >= 1
+
+
 def test_route_file_is_rejected_when_malformed(tmp_path: Path) -> None:
     bad = tmp_path / "routes.yaml"
+    classes = "rate_limits:\n  default: {rps: 1, burst: 1}\n"
 
-    bad.write_text("routes: []")
+    bad.write_text("routes:\n  - prefix: /x\n    upstream: backend\n    policy: public\n")
+    with pytest.raises(ValueError, match="rate_limits"):
+        load_route_table(bad)
+
+    bad.write_text(classes + "routes: []")
     with pytest.raises(ValueError, match="non-empty list"):
         load_route_table(bad)
 
-    bad.write_text("routes:\n  - upstream: backend\n    policy: public\n")
+    bad.write_text(classes + "routes:\n  - upstream: backend\n    policy: public\n")
     with pytest.raises(ValueError, match="missing required key"):
         load_route_table(bad)
 
-    bad.write_text("routes:\n  - prefix: /x\n    upstream: backend\n    policy: superuser\n")
+    bad.write_text(
+        classes + "routes:\n  - prefix: /x\n    upstream: backend\n    policy: superuser\n"
+    )
     with pytest.raises(ValueError, match="superuser"):
         load_route_table(bad)
 
-    bad.write_text("routes:\n  - prefix: api/v1\n    upstream: backend\n    policy: public\n")
+    bad.write_text(
+        classes + "routes:\n  - prefix: api/v1\n    upstream: backend\n    policy: public\n"
+    )
     with pytest.raises(ValueError, match="must start with"):
+        load_route_table(bad)
+
+    bad.write_text(
+        classes
+        + "routes:\n  - prefix: /x\n    upstream: backend\n    policy: public\n"
+        + "    rate_limit: nope\n"
+    )
+    with pytest.raises(ValueError, match="unknown rate_limit class"):
         load_route_table(bad)
 
 

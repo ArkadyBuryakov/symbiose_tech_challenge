@@ -10,7 +10,6 @@ import pytest
 from pmp_common.pmtiles import (
     HEADER_SIZE,
     InvalidPMTiles,
-    UnsupportedPMTilesVersion,
     parse_header,
 )
 
@@ -82,8 +81,14 @@ def test_rejects_a_non_pmtiles_file() -> None:
 
 
 def test_rejects_an_unsupported_version() -> None:
-    with pytest.raises(UnsupportedPMTilesVersion):
+    with pytest.raises(InvalidPMTiles, match="version 2"):
         parse_header(make_header(version=2))
+
+
+def test_rejects_zoom_above_30_as_invalid_pmtiles() -> None:
+    """Must be InvalidPMTiles (permanent), not a pydantic ValidationError."""
+    with pytest.raises(InvalidPMTiles, match="zoom above"):
+        parse_header(make_header(max_zoom=31))
 
 
 def test_rejects_inverted_zooms() -> None:

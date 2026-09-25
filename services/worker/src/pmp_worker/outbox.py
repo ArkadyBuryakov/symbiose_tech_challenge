@@ -1,45 +1,79 @@
-"""Transactional outbox relay.
+"""Transactional outbox relay, plus confirmed Kafka produce.
 
 Result events are written to ``catalog.outbox`` in the same transaction as the
-job's terminal state, then moved onto Kafka by this loop. That is what makes
-"the job says SUCCEEDED but nobody was told" impossible.
-
-``FOR UPDATE SKIP LOCKED`` lets several worker replicas relay concurrently
-without coordinating: each grabs a disjoint batch. A row can still be produced
+job's terminal state, then moved onto Kafka by this loop. ``FOR UPDATE SKIP
+LOCKED`` lets several replicas relay concurrently. A row can still be produced
 twice (crash between produce and ``sent_at``), so consumers deduplicate on
-``event_id`` — at-least-once, like everything else here.
+``event_id``.
 """
 
 from __future__ import annotations
 
 import json
 import threading
-from datetime import UTC, datetime
-from typing import Any
+from collections.abc import Callable, Sequence
+from typing import Any, NamedTuple
 
-from confluent_kafka import KafkaException, Producer
+from confluent_kafka import KafkaError, KafkaException, Message, Producer
 from sqlalchemy import Engine, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 
-from pmp_common.logging import get_logger, log_context
+from pmp_common.logging import get_logger
 from pmp_common.metrics import OUTBOX_PENDING, OUTBOX_RELAYED
 from pmp_common.tables import outbox
 
-__all__ = ["OutboxRelay"]
+__all__ = ["KafkaMessage", "OutboxRelay", "produce_confirmed"]
 
 log = get_logger(__name__)
+
+
+class KafkaMessage(NamedTuple):
+    topic: str
+    key: bytes | None
+    value: bytes | None
+    headers: list[tuple[str, str | bytes | None]]
+
+
+def produce_confirmed(
+    producer: Producer, messages: Sequence[KafkaMessage], timeout: float = 10.0
+) -> list[bool]:
+    """Produce ``messages`` and report, per message, whether the broker acked it.
+
+    ``flush()`` never raises and ``produce()`` only fails locally, so broker
+    acknowledgement is taken from the delivery callbacks alone. One flush per
+    call, not per message.
+    """
+    delivered = [False] * len(messages)
+
+    def on_delivery(index: int) -> Callable[[KafkaError | None, Message], None]:
+        def callback(err: KafkaError | None, _msg: Message) -> None:
+            if err is None:
+                delivered[index] = True
+            else:
+                log.warning("kafka.delivery_failed", topic=messages[index].topic, error=str(err))
+
+        return callback
+
+    for index, message in enumerate(messages):
+        try:
+            producer.produce(
+                message.topic,
+                key=message.key,
+                value=message.value,
+                headers=message.headers,
+                on_delivery=on_delivery(index),
+            )
+        except (BufferError, KafkaException) as exc:
+            log.warning("kafka.produce_failed", topic=message.topic, error=str(exc))
+    producer.flush(timeout)
+    return delivered
 
 
 class OutboxRelay:
     """Background thread that drains the outbox onto Kafka."""
 
     def __init__(
-        self,
-        engine: Engine,
-        producer: Producer,
-        *,
-        batch_size: int,
-        interval_seconds: float,
+        self, engine: Engine, producer: Producer, *, batch_size: int, interval_seconds: float
     ) -> None:
         self._engine = engine
         self._producer = producer
@@ -63,16 +97,14 @@ class OutboxRelay:
             try:
                 relayed = self.drain_once()
             except SQLAlchemyError as exc:
-                # The database being briefly unavailable is normal; the rows are
-                # still there and will be picked up on the next pass.
+                # The rows are still there; the next pass picks them up.
                 log.warning("outbox.relay_error", error=str(exc))
                 relayed = 0
-            # Back off only when there was nothing to do, so a backlog drains
-            # as fast as the broker allows.
+            # Back off only when there was nothing to do, so a backlog drains fast.
             self._stop.wait(0 if relayed == self._batch_size else self._interval)
 
     def drain_once(self) -> int:
-        """Relay one batch. Returns how many rows were produced."""
+        """Relay one batch. Returns how many rows the broker acknowledged."""
         with self._engine.begin() as conn:
             rows = conn.execute(
                 select(outbox)
@@ -82,50 +114,29 @@ class OutboxRelay:
                 .with_for_update(skip_locked=True)
             ).all()
 
-            if not rows:
-                self._record_backlog(conn)
-                return 0
-
-            sent_ids: list[Any] = []
-            for row in rows:
-                if self._produce(row):
-                    sent_ids.append(row.id)
-
-            if sent_ids:
+            delivered = produce_confirmed(self._producer, [_to_message(r) for r in rows])
+            sent = [row for row, ok in zip(rows, delivered, strict=True) if ok]
+            if sent:
                 conn.execute(
                     update(outbox)
-                    .where(outbox.c.id.in_(sent_ids))
-                    .values(sent_at=datetime.now(UTC))
+                    .where(outbox.c.id.in_([row.id for row in sent]))
+                    .values(sent_at=func.now())
                 )
-            conn.execute(
-                update(outbox)
-                .where(outbox.c.id.in_([r.id for r in rows]))
-                .values(attempts=outbox.c.attempts + 1)
+            for row in sent:
+                OUTBOX_RELAYED.labels(row.topic).inc()
+
+            OUTBOX_PENDING.set(
+                conn.execute(
+                    select(func.count()).select_from(outbox).where(outbox.c.sent_at.is_(None))
+                ).scalar_one()
             )
-            self._record_backlog(conn)
-        return len(sent_ids)
+        return len(sent)
 
-    def _produce(self, row: Any) -> bool:
-        with log_context(job_id=row.payload.get("job_id"), dataset_id=row.key):
-            try:
-                self._producer.produce(
-                    row.topic,
-                    key=str(row.key).encode(),
-                    value=json.dumps(row.payload, separators=(",", ":")).encode(),
-                    headers=[(k, str(v).encode()) for k, v in (row.headers or {}).items()],
-                )
-                # Block until this batch is acknowledged: `sent_at` must not be
-                # set for a message the broker never took.
-                self._producer.flush(10.0)
-            except (BufferError, KafkaException) as exc:
-                log.warning("outbox.produce_failed", topic=row.topic, error=str(exc))
-                return False
-            OUTBOX_RELAYED.labels(row.topic).inc()
-            return True
 
-    @staticmethod
-    def _record_backlog(conn: Any) -> None:
-        pending = conn.execute(
-            select(func.count()).select_from(outbox).where(outbox.c.sent_at.is_(None))
-        ).scalar_one()
-        OUTBOX_PENDING.set(pending)
+def _to_message(row: Any) -> KafkaMessage:
+    return KafkaMessage(
+        topic=row.topic,
+        key=str(row.key).encode(),
+        value=json.dumps(row.payload, separators=(",", ":")).encode(),
+        headers=[(k, str(v).encode()) for k, v in (row.headers or {}).items()],
+    )

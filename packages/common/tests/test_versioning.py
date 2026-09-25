@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from pmp_common.enums import PublicationResult
 from pmp_common.versioning import DatasetState, VersionKey, decide_version, spec_digest
 
@@ -22,23 +20,21 @@ def test_first_publication_creates_version_1() -> None:
     assert decision.result is PublicationResult.CREATED
     assert decision.seq == 1
     assert decision.create_version
-    assert decision.move_pointer
 
 
 def test_same_bytes_and_same_spec_deduplicates() -> None:
-    state = DatasetState(latest_seq=2, current_seq=2, current_key=B1, available={A1: 1, B1: 2})
+    state = DatasetState(latest_seq=2, current_key=B1, available={A1: 1, B1: 2})
 
     decision = decide_version(state, B1)
 
     assert decision.result is PublicationResult.DEDUPLICATED
     assert decision.seq == 2
     assert not decision.create_version
-    assert not decision.move_pointer
 
 
 def test_same_bytes_with_a_changed_spec_creates_a_new_version() -> None:
     """The case that used to be silently deduplicated, dropping the new spec."""
-    state = DatasetState(latest_seq=1, current_seq=1, current_key=A1, available={A1: 1})
+    state = DatasetState(latest_seq=1, current_key=A1, available={A1: 1})
 
     decision = decide_version(state, A2)
 
@@ -47,25 +43,24 @@ def test_same_bytes_with_a_changed_spec_creates_a_new_version() -> None:
 
 
 def test_new_bytes_with_the_same_spec_creates_a_new_version() -> None:
-    state = DatasetState(latest_seq=1, current_seq=1, current_key=A1, available={A1: 1})
+    state = DatasetState(latest_seq=1, current_key=A1, available={A1: 1})
 
     assert decide_version(state, B1).result is PublicationResult.CREATED
 
 
 def test_republishing_an_older_bytes_and_spec_pair_moves_the_pointer_back() -> None:
-    state = DatasetState(latest_seq=2, current_seq=2, current_key=A2, available={A1: 1, A2: 2})
+    state = DatasetState(latest_seq=2, current_key=A2, available={A1: 1, A2: 2})
 
     decision = decide_version(state, A1)
 
     assert decision.result is PublicationResult.POINTER_MOVED
     assert decision.seq == 1
     assert not decision.create_version
-    assert decision.move_pointer
 
 
 def test_older_bytes_with_a_spec_never_paired_with_them_is_new() -> None:
     """Matching the bytes of an old version is not enough; the pair must match."""
-    state = DatasetState(latest_seq=2, current_seq=2, current_key=B1, available={A1: 1, B1: 2})
+    state = DatasetState(latest_seq=2, current_key=B1, available={A1: 1, B1: 2})
 
     decision = decide_version(state, A2)
 
@@ -76,7 +71,7 @@ def test_older_bytes_with_a_spec_never_paired_with_them_is_new() -> None:
 def test_retired_versions_are_not_resurrected() -> None:
     """A retired version is excluded from ``available`` by the caller, so the
     same publication must allocate a fresh sequence number."""
-    state = DatasetState(latest_seq=4, current_seq=2, current_key=B1, available={B1: 2})
+    state = DatasetState(latest_seq=4, current_key=B1, available={B1: 2})
 
     decision = decide_version(state, C1)  # C1 was seq 3, now RETIRED
 
@@ -85,22 +80,9 @@ def test_retired_versions_are_not_resurrected() -> None:
 
 
 def test_sequence_numbers_are_never_reused_after_a_rollback() -> None:
-    state = DatasetState(latest_seq=2, current_seq=1, current_key=A1, available={A1: 1, B1: 2})
+    state = DatasetState(latest_seq=2, current_key=A1, available={A1: 1, B1: 2})
 
     assert decide_version(state, C1).seq == 3
-
-
-@pytest.mark.parametrize("bad", ["", "abc", "A" * 64, "g" * 64, "a" * 63, "a" * 65])
-def test_malformed_hashes_are_rejected(bad: str) -> None:
-    with pytest.raises(ValueError, match="64 lowercase hex"):
-        decide_version(DatasetState(latest_seq=0), VersionKey(bad, SPEC_1))
-    with pytest.raises(ValueError, match="64 lowercase hex"):
-        decide_version(DatasetState(latest_seq=0), VersionKey("a" * 64, bad))
-
-
-def test_negative_latest_seq_is_rejected() -> None:
-    with pytest.raises(ValueError, match="latest_seq"):
-        DatasetState(latest_seq=-1)
 
 
 # --------------------------------------------------------------------------

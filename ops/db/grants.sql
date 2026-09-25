@@ -31,7 +31,7 @@ GRANT SELECT, UPDATE ON catalog.publication_jobs TO worker_svc;
 GRANT SELECT, INSERT, UPDATE ON catalog.dataset_versions TO worker_svc;
 -- Pointer + latest_seq updates; the worker never creates datasets.
 GRANT SELECT, UPDATE ON catalog.datasets TO worker_svc;
-GRANT SELECT, INSERT, UPDATE, DELETE ON catalog.outbox TO worker_svc;
+GRANT SELECT, INSERT, UPDATE ON catalog.outbox TO worker_svc;
 
 -- Both services read the Alembic version table (harmless, and it keeps
 -- `\dt` from erroring in a debug session).

@@ -73,6 +73,8 @@ def test_rollback_requires_a_positive_sequence() -> None:
 
 def test_demo_upload_sha256_must_be_lowercase_hex() -> None:
     assert DemoUploadRequest(sha256="a" * 64).sha256 == "a" * 64
+    with pytest.raises(ValidationError):
+        DemoUploadRequest()  # type: ignore[call-arg]  # the checksum is mandatory
     for bad in ["A" * 64, "z" * 64, "abc"]:
         with pytest.raises(ValidationError):
             DemoUploadRequest(sha256=bad)

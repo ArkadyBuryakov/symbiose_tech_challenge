@@ -11,6 +11,18 @@
 #   platform_admin  403 without the platform admin role
 #
 # The longest matching prefix wins, whatever order the rules are written in.
+#
+# rate_limit names a class below. Each class is an in-memory token bucket per
+# caller (user id when known, client IP otherwise): `rps` tokens per second,
+# up to `burst` in reserve. Per replica; Redis is the multi-replica next step.
+
+rate_limits:
+  # Sign-in and friends: BetterAuth has its own limiter too; this one only
+  # stops a single client hammering the auth service.
+  auth: {rps: 10, burst: 40}
+  # Catalogue reads, including the map page's polling of /current.
+  read: {rps: 40, burst: 80}
+  default: {rps: 20, burst: 40}
 
 routes:
   # BetterAuth owns this surface. It is passed through verbatim so that every

@@ -55,22 +55,6 @@ class EdgeVerifierSettings(ServiceSettings):
     )
 
 
-def _reason(exc: PolicyError) -> str:
-    """A low-cardinality label for metrics, derived from the refusal."""
-    text = str(exc)
-    for needle, label in (
-        ("missing", "missing"),
-        ("malformed", "malformed"),
-        ("key pair", "unknown_key"),
-        ("signature", "bad_signature"),
-        ("expired", "expired"),
-        ("cover", "out_of_scope"),
-    ):
-        if needle in text:
-            return label
-    return "invalid"
-
-
 def build_app(settings: EdgeVerifierSettings | None = None) -> FastAPI:
     settings = settings or EdgeVerifierSettings()
     configure_logging(
@@ -97,6 +81,12 @@ def build_app(settings: EdgeVerifierSettings | None = None) -> FastAPI:
         original_uri = request.headers.get("x-original-uri", "")
         url = f"{settings.public_base_url}{original_uri}"
         try:
+            # nginx sends the normalised $uri. Anything still carrying a dot
+            # segment or an escape was not normalised, so the path we check
+            # may not be the object nginx serves: refuse rather than guess.
+            path = original_uri.split("?", 1)[0]
+            if "%" in path or "/./" in path or "/../" in path or path.endswith("/.."):
+                raise PolicyError("the tile path is not normalised", reason="not_normalised")
             verifier.verify(
                 policy_b64=request.cookies.get(COOKIE_POLICY),
                 signature_b64=request.cookies.get(COOKIE_SIGNATURE),
@@ -104,10 +94,9 @@ def build_app(settings: EdgeVerifierSettings | None = None) -> FastAPI:
                 url=url,
             )
         except PolicyError as exc:
-            reason = _reason(exc)
-            TILE_DECISIONS.labels("deny", reason).inc()
+            TILE_DECISIONS.labels("deny", exc.reason).inc()
             # Logged without the cookie values: they are credentials.
-            log.info("tiles.denied", path=original_uri.split("?", 1)[0], reason=reason)
+            log.info("tiles.denied", path=original_uri.split("?", 1)[0], reason=exc.reason)
             return Response(status_code=403)
 
         TILE_DECISIONS.labels("allow", "ok").inc()

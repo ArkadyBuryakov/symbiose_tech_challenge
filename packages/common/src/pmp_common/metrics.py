@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
-    CollectorRegistry,
     Counter,
     Gauge,
     Histogram,
@@ -86,6 +85,6 @@ RECONCILER_REQUEUED = Counter(
 )
 
 
-def render_metrics(registry: CollectorRegistry | None = None) -> bytes:
+def render_metrics() -> bytes:
     """Return the Prometheus exposition payload."""
-    return generate_latest(registry) if registry is not None else generate_latest()
+    return generate_latest()

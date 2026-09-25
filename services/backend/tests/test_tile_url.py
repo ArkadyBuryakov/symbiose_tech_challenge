@@ -53,7 +53,7 @@ def test_presigned_put_is_rewritten_onto_the_edge_origin() -> None:
     )
 
     url, headers = storage.presign_staging_put(
-        key="org_a/upload-1/data.pmtiles", sha256_b64=None, content_length=None
+        key="org_a/upload-1/data.pmtiles", sha256_b64="3q2+7w==", content_length=None
     )
 
     assert url.startswith(f"http://localhost:8080{STAGING_UPLOAD_PREFIX}/staging/org_a/upload-1/")

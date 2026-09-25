@@ -24,11 +24,8 @@ def a_request(**overrides: object) -> PublicationRequested:
         "tenant_id": "org_a",
         "dataset_id": uuid4(),
         "job_id": uuid4(),
-        "dataset_slug": "crowns",
         "source_key": "org_a/upload-1/data.pmtiles",
         "visibility": Visibility.PUBLIC,
-        "requested_by": "user_alice",
-        "idempotency_key": "key-1",
     }
     return PublicationRequested(**(base | overrides))
 
@@ -41,7 +38,6 @@ def test_requested_round_trip() -> None:
     assert decoded == event
     assert decoded.event_type == "publication.requested"
     assert decoded.schema_version == SCHEMA_VERSION
-    assert decoded.attempt == 1
 
 
 def test_occurred_at_is_timezone_aware() -> None:
@@ -112,11 +108,3 @@ def test_sha256_length_is_enforced() -> None:
             object_key="k",
             visibility=Visibility.PUBLIC,
         )
-
-
-def test_permanent_vs_transient_error_classification() -> None:
-    assert ErrorCode.INVALID_PMTILES.is_permanent
-    assert ErrorCode.SOURCE_NOT_FOUND.is_permanent
-    assert ErrorCode.TENANT_MISMATCH.is_permanent
-    assert not ErrorCode.STORAGE_ERROR.is_permanent
-    assert not ErrorCode.DATABASE_ERROR.is_permanent

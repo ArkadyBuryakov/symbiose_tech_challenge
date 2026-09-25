@@ -81,9 +81,8 @@ docker compose exec kafka rpk topic consume publication.requested.dlq -o :end \
   -f 'key=%k error=%h{x-error-code} detail=%h{x-error-detail}\n%v\n\n'
 ```
 
-The `x-error-code` header is the underlying cause (usually `STORAGE_ERROR` or
-`DATABASE_ERROR`); `x-error-detail` is the last error message. Grafana's
-*DLQ (1h)* stat and `dlq_messages_total` show when it started.
+The `x-error-code` header is the underlying cause (usually `STORAGE_ERROR`); `x-error-detail` is the last error message.
+Grafana's *DLQ (1h)* stat and `dlq_messages_total` show when it started.
 
 **Replay** once the cause is fixed. The supported path is the API, which
 resets the job and re-emits it:
@@ -119,7 +118,7 @@ Check `error_code` first — it says whether a retry can possibly help:
 
 | `error_code` | Meaning | Fix before retrying |
 |---|---|---|
-| `INVALID_PMTILES`, `UNSUPPORTED_PMTILES_VERSION`, `EMPTY_SOURCE` | The staged bytes are not a PMTiles v3 archive | Re-export and re-stage. A new upload plus a new `POST /publications` is usually simpler than overwriting. |
+| `INVALID_PMTILES`, `EMPTY_SOURCE` | The staged bytes are not a PMTiles v3 archive | Re-export and re-stage. A new upload plus a new `POST /publications` is usually simpler than overwriting. |
 | `SOURCE_NOT_FOUND` | Nothing at `source_key` (typo, or expired by the 7-day staging lifecycle) | Stage the file again |
 | `SOURCE_FORBIDDEN` | The worker's credentials cannot read staging | IAM / bucket policy |
 | `MAX_ATTEMPTS_EXCEEDED` | Transient errors, retries exhausted | Fix the dependency (see *DLQ* above) |
@@ -268,7 +267,8 @@ cached, so recovery is immediate once auth is back.
    WHERE "referenceId" = (SELECT id FROM auth."user" WHERE email = '<email>');
    ```
 
-   For the demo producer, `make seed-rotate` deletes and re-mints its key.
+   For the demo producer, delete `dev-keys/producer-api-key` and re-run
+   `make seed`, which mints a new key into that file.
 
 3. **Remove tenant membership** if they should keep an account but lose a tenant:
 

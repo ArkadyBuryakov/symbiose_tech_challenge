@@ -26,6 +26,7 @@ __all__ = [
     "Page",
     "PublicationAccepted",
     "RollbackRequest",
+    "TileSession",
     "VersionSummary",
 ]
 
@@ -44,7 +45,6 @@ class Page[T](BaseModel):
     """Cursor-free page. Datasets and jobs are small, bounded collections."""
 
     items: list[T]
-    total: int = Field(description="Total rows matching the filter, ignoring limit/offset.")
     limit: int
     offset: int
 
@@ -70,7 +70,7 @@ class CreatePublicationRequest(BaseModel):
     )
     visibility: Visibility | None = Field(
         default=None,
-        description="Only honoured when the dataset is created; change it explicitly afterwards.",
+        description="Only honoured when the dataset is created (default: private).",
     )
     spec: Spec | None = Field(
         default=None, description="Layer/style spec stored with the resulting version."
@@ -187,8 +187,7 @@ class RollbackRequest(BaseModel):
 class DemoUploadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    sha256: str | None = Field(
-        default=None,
+    sha256: str = Field(
         pattern=r"^[0-9a-f]{64}$",
         description="Hex SHA-256 the browser computed; bound into the presigned PUT.",
     )
@@ -203,3 +202,12 @@ class DemoUploadResponse(BaseModel):
         description="Headers the browser MUST send verbatim, or the signature will not match."
     )
     expires_in: int
+
+
+# --------------------------------------------------------------------------
+# Tile cookies
+# --------------------------------------------------------------------------
+class TileSession(BaseModel):
+    resource: str = Field(description="The CloudFront resource pattern the cookies grant.")
+    expires_at: datetime
+    expires_in: int = Field(description="Seconds until the cookies expire.")

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -28,7 +28,6 @@ __all__ = [
     "EventEnvelope",
     "PublicationFailed",
     "PublicationRequested",
-    "PublicationResultEvent",
     "PublicationSucceeded",
     "decode_event",
     "encode_event",
@@ -68,12 +67,8 @@ class PublicationRequested(EventEnvelope):
 
     event_type: Literal["publication.requested"] = "publication.requested"
 
-    dataset_slug: str
     source_key: str = Field(description="Key of the staged object in the staging bucket.")
     visibility: Visibility
-    requested_by: str = Field(description="User id that requested the publication.")
-    idempotency_key: str
-    attempt: int = Field(default=1, ge=1, description="1 on first emit; >1 when re-emitted.")
 
 
 class PublicationSucceeded(EventEnvelope):
@@ -88,8 +83,7 @@ class PublicationSucceeded(EventEnvelope):
         default=None,
         min_length=64,
         max_length=64,
-        description="Digest of the layer/style spec; with sha256, the version's identity. "
-        "Optional so that events emitted before it existed still validate.",
+        description="Digest of the layer/style spec; with sha256, the version's identity.",
     )
     size_bytes: int = Field(ge=0)
     object_key: str
@@ -104,17 +98,6 @@ class PublicationFailed(EventEnvelope):
     error_message: str = Field(max_length=2000)
     attempts: int = Field(ge=1)
     dead_lettered: bool = False
-
-
-PublicationResultEvent = Annotated[
-    PublicationSucceeded | PublicationFailed,
-    Field(discriminator="event_type"),
-]
-
-AnyEvent = Annotated[
-    PublicationRequested | PublicationSucceeded | PublicationFailed,
-    Field(discriminator="event_type"),
-]
 
 
 def encode_event(event: EventEnvelope) -> bytes:

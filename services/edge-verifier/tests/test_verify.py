@@ -94,3 +94,21 @@ async def test_range_request_query_strings_do_not_escape_the_scope(app, keys) ->
     cookies = cookies_for(keys[0], f"{ORIGIN}/tiles/private/org_a/*")
 
     assert await ask(app, "/tiles/private/org_b/x?/tiles/private/org_a/", cookies) == 403
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "/tiles/private/org_a/..%2Forg_b/ds/sha/data.pmtiles",
+        "/tiles/private/org_a/../org_b/ds/sha/data.pmtiles",
+        "/tiles/private/org_a/./x/../../org_b/data.pmtiles",
+    ],
+)
+async def test_a_path_that_escapes_the_tenant_prefix_is_forbidden(app, keys, uri) -> None:  # type: ignore[no-untyped-def]
+    """Regression: nginx routes on the normalised path, so a raw
+    `/tiles/private/<mine>/..%2F<theirs>/...` must never be authorised against
+    <mine>. The edge now sends the normalised `$uri`; the verifier also refuses
+    anything that still looks un-normalised."""
+    cookies = cookies_for(keys[0], f"{ORIGIN}/tiles/private/org_a/*")
+
+    assert await ask(app, uri, cookies) == 403

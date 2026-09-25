@@ -15,7 +15,6 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from pmp_common.enums import TenantRole
 from pmp_common.identity import Identity, InternalTokenError, InternalTokenVerifier
 from pmp_common.logging import bind_log_context
 from pmp_common.problem import Forbidden, Unauthorized
@@ -28,77 +27,37 @@ __all__ = [
     "PlatformAdmin",
     "TenantAdmin",
     "TenantOrPlatformAdmin",
-    "build_identity_resolver",
-    "require_identity",
+    "build_token_verifier",
 ]
 
 _BEARER = "bearer "
 
 
-class _Resolver:
-    """Extracts an :class:`Identity` from a request."""
-
-    def __init__(self, settings: BackendSettings) -> None:
-        self._mode = settings.auth_mode
-        self._settings = settings
-        self._verifier: InternalTokenVerifier | None = None
-        if settings.auth_mode == "internal_jwt":
-            self._verifier = InternalTokenVerifier.from_file(
-                settings.internal_jwt_public_key_path,
-                audience=settings.internal_jwt_audience,
-            )
-
-    def __call__(self, request: Request) -> Identity | None:
-        if self._mode == "dev_stub":
-            return self._stub_identity()
-
-        header = request.headers.get("authorization", "")
-        if not header.lower().startswith(_BEARER):
-            return None
-        assert self._verifier is not None
-        try:
-            return self._verifier.verify(header[len(_BEARER) :].strip())
-        except InternalTokenError as exc:
-            # A present-but-invalid internal token is a hard failure: it means
-            # something is forging identity, or the gateway's key has rotated.
-            raise Unauthorized(
-                "The internal identity token is missing, expired or invalid.",
-                code="invalid-internal-token",
-            ) from exc
-
-    def _stub_identity(self) -> Identity:
-        """Development-only fixed identity.
-
-        Used before the gateway and auth service exist (phase 1). Settings
-        refuse to start in this mode outside ``ENVIRONMENT=local``.
-        """
-        return Identity(
-            user_id=self._settings.dev_stub_user_id,
-            tenant_id=self._settings.dev_stub_tenant_id,
-            tenant_role=TenantRole.OWNER,
-            platform_role="admin",
-            auth_method="session",
-        )
-
-
-def build_identity_resolver(settings: BackendSettings) -> _Resolver:
-    return _Resolver(settings)
-
-
-def _resolver(request: Request) -> _Resolver:
-    resolver: _Resolver = request.app.state.identity_resolver
-    return resolver
+def build_token_verifier(settings: BackendSettings) -> InternalTokenVerifier:
+    return InternalTokenVerifier.from_file(
+        settings.internal_jwt_public_key_path, audience=settings.internal_jwt_audience
+    )
 
 
 def optional_identity(request: Request) -> Identity | None:
     """Identity if a valid internal token is present, else ``None``.
 
     Used by the read-only dataset endpoints, which serve public datasets to
-    anonymous callers.
+    anonymous callers. A present-but-invalid token is a hard 401: it means
+    something is forging identity, or the gateway's key has rotated.
     """
-    identity = _resolver(request)(request)
-    if identity is not None:
-        bind_log_context(**identity.log_fields())
+    header = request.headers.get("authorization", "")
+    if not header.lower().startswith(_BEARER):
+        return None
+    verifier: InternalTokenVerifier = request.app.state.token_verifier
+    try:
+        identity = verifier.verify(header[len(_BEARER) :].strip())
+    except InternalTokenError as exc:
+        raise Unauthorized(
+            "The internal identity token is missing, expired or invalid.",
+            code="invalid-internal-token",
+        ) from exc
+    bind_log_context(**identity.log_fields())
     return identity
 
 
@@ -112,8 +71,7 @@ def require_identity(request: Request) -> Identity:
 def require_tenant_identity(request: Request) -> Identity:
     """Authenticated *and* scoped to an organization.
 
-    A signed-in user with no active organization has nothing to read or write
-    here, and saying so explicitly is better than an empty list.
+    Handlers behind this dependency may rely on ``identity.tenant_id`` being set.
     """
     identity = require_identity(request)
     if not identity.tenant_id:
@@ -126,11 +84,7 @@ def require_tenant_identity(request: Request) -> Identity:
 
 
 def require_tenant_or_platform_admin(request: Request) -> Identity:
-    """A tenant member, or a platform administrator who belongs to no tenant.
-
-    For endpoints whose *scope* depends on who is asking — a platform admin is
-    not refused for lacking a tenant, they are given the cross-tenant scope.
-    """
+    """A tenant member, or a platform administrator who belongs to no tenant."""
     identity = require_identity(request)
     if identity.is_platform_admin:
         return identity
@@ -145,7 +99,7 @@ def require_platform_admin(request: Request) -> Identity:
 
 
 def require_tenant_admin(request: Request) -> Identity:
-    """Tenant ``owner``/``admin``, or a platform administrator."""
+    """Tenant ``owner``/``admin`` of the caller's active organization."""
     identity = require_tenant_identity(request)
     if not identity.can_administer_tenant:
         raise Forbidden(

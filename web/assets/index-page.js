@@ -6,7 +6,7 @@
  * serves them public datasets — so the page is useful before signing in.
  */
 
-import { ApiError, api, formatBytes, formatTime, pill } from "./api.js";
+import { ApiError, api, formatBytes, formatTime, notify as showNotice, pill } from "./api.js";
 
 const els = {
     alert: document.getElementById("alert"),
@@ -22,16 +22,12 @@ const els = {
 };
 
 let session = null;
-let jobsTimer = null;
+// The edge serves upload.html only when DEMO_UPLOAD_ENABLED=true.
+const uploadEnabled = fetch("/upload.html", { method: "HEAD" })
+    .then((response) => response.ok)
+    .catch(() => false);
 
-function notify(message, kind = "info") {
-    els.alert.innerHTML = "";
-    if (!message) return;
-    const div = document.createElement("div");
-    div.className = kind === "error" ? "notice error" : "notice";
-    div.textContent = message;
-    els.alert.appendChild(div);
-}
+const notify = (message, kind) => showNotice(els.alert, message, kind);
 
 function emptyRow(tbody, columns, text) {
     tbody.innerHTML = "";
@@ -49,8 +45,7 @@ async function loadSession() {
     try {
         session = await api.session();
     } catch {
-        // The auth service may not be wired up yet (phases 1–3); the read-only
-        // parts of this page still work.
+        // Auth unreachable: the read-only parts of this page still work.
         session = null;
     }
     renderSession();
@@ -60,7 +55,8 @@ function renderSession() {
     els.sessionArea.innerHTML = "";
     const signedIn = Boolean(session?.user);
     els.signinCard.hidden = signedIn;
-    els.uploadLink.hidden = !signedIn;
+    els.uploadLink.hidden = true;
+    if (signedIn) void uploadEnabled.then((ok) => (els.uploadLink.hidden = !ok));
 
     if (!signedIn) {
         const span = document.createElement("span");
@@ -257,21 +253,22 @@ async function showVersions(dataset) {
 // --------------------------------------------------------------------------
 // Jobs
 // --------------------------------------------------------------------------
+/** Render the jobs table; returns whether any job is still in flight. */
 async function loadJobs() {
     if (!session?.user) {
         emptyRow(els.jobs, 7, "Sign in to see publication jobs.");
-        return;
+        return false;
     }
     let page;
     try {
         page = await api.listPublications({ limit: 20 });
     } catch (error) {
         emptyRow(els.jobs, 7, `Could not load jobs: ${error.message}`);
-        return;
+        return false;
     }
     if (page.items.length === 0) {
         emptyRow(els.jobs, 7, "No publication jobs yet.");
-        return;
+        return false;
     }
 
     els.jobs.innerHTML = "";
@@ -308,7 +305,7 @@ async function loadJobs() {
                 try {
                     await api.retryPublication(job.id);
                     notify("Retry queued.");
-                    await loadJobs();
+                    await refreshAll();
                 } catch (err) {
                     notify(`Retry failed: ${err.message}`, "error");
                     retry.disabled = false;
@@ -317,22 +314,19 @@ async function loadJobs() {
             actions.appendChild(retry);
         }
     }
+    return page.items.some((job) => job.status === "PENDING" || job.status === "RUNNING");
 }
 
+let jobsInFlight = false;
+
 async function refreshAll() {
-    await Promise.all([loadDatasets(), loadJobs()]);
+    [, jobsInFlight] = await Promise.all([loadDatasets(), loadJobs()]);
 }
 
 await loadSession();
 await refreshAll();
 
-// Jobs are asynchronous, so the table polls while any of them is in flight.
-jobsTimer = setInterval(async () => {
-    if (!session?.user) return;
-    const page = await api.listPublications({ limit: 20 }).catch(() => null);
-    if (!page) return;
-    if (page.items.some((job) => job.status === "PENDING" || job.status === "RUNNING")) {
-        await refreshAll();
-    }
+// Jobs are asynchronous, so the page refreshes while any of them is in flight.
+setInterval(() => {
+    if (jobsInFlight) void refreshAll();
 }, 3000);
-window.addEventListener("beforeunload", () => clearInterval(jobsTimer));

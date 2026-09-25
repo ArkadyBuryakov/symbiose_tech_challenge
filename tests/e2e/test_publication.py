@@ -6,6 +6,8 @@ import os
 
 import httpx
 
+from pmp_common.kafka import TOPIC_DLQ
+
 from .conftest import API, BASE_URL, Archive, Session, inside
 
 
@@ -134,13 +136,16 @@ def test_4_new_content_becomes_version_2_and_rollback_restores_version_1(
 def test_4b_members_cannot_roll_back(
     alice: Session, bob: Session, slug: str, archive_v1: Archive
 ) -> None:
-    """Rollback is an owner/admin action; a plain member of *another* tenant
-    certainly cannot do it, and gets a 404 rather than learning it exists."""
-    job = alice.publish_and_wait(slug, archive_v1)
+    """Rollback is an owner/admin action: a member of the owning tenant gets 403,
+    and a caller from another tenant is refused too."""
+    own = bob.publish_and_wait(slug, archive_v1)  # bob is a member of tenant-b
+    assert own["status"] == "SUCCEEDED", own
+    member = bob.put(f"{API}/datasets/{own['dataset_id']}/current", json={"seq": 1})
+    assert member.status_code == 403, member.text
 
-    response = bob.put(f"{API}/datasets/{job['dataset_id']}/current", json={"seq": 1})
-
-    assert response.status_code in (403, 404)
+    other = alice.publish_and_wait(slug, archive_v1)
+    foreign = bob.put(f"{API}/datasets/{other['dataset_id']}/current", json={"seq": 1})
+    assert foreign.status_code in (403, 404), foreign.text
 
 
 def test_7_invalid_file_fails_permanently_and_retry_works_once_fixed(
@@ -156,7 +161,7 @@ def test_7_invalid_file_fails_permanently_and_retry_works_once_fixed(
 
     dlq = inside(
         "kafka",
-        "rpk topic consume publication.requested.dlq -o :end -f '%v\\n' 2>/dev/null || true",
+        f"rpk topic consume {TOPIC_DLQ} -o :end -f '%v\\n' 2>/dev/null || true",
     )
     assert accepted["job_id"] not in dlq, "permanent failures must not be dead-lettered"
 

@@ -8,16 +8,17 @@ resources (a database connection) are created here.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import Depends, Request
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from .publisher import PublicationPublisher
+from pmp_common.kafka import AsyncProducer
+
 from .settings import BackendSettings
 from .storage import Storage
 
-__all__ = ["Conn", "Publisher", "Settings", "Store", "Tx"]
+__all__ = ["Conn", "Producer", "Settings", "Store"]
 
 
 def get_settings_dep(request: Request) -> BackendSettings:
@@ -25,9 +26,9 @@ def get_settings_dep(request: Request) -> BackendSettings:
     return settings
 
 
-def get_publisher(request: Request) -> PublicationPublisher:
-    publisher: PublicationPublisher = request.app.state.publisher
-    return publisher
+def get_producer(request: Request) -> AsyncProducer:
+    producer: AsyncProducer = request.app.state.producer
+    return producer
 
 
 def get_storage(request: Request) -> Storage:
@@ -44,7 +45,7 @@ async def get_connection(request: Request) -> AsyncIterator[AsyncConnection]:
     uncommitted at the end of a successful request is committed here; any
     exception rolls back.
     """
-    engine: Any = request.app.state.engine
+    engine: AsyncEngine = request.app.state.engine
     async with engine.connect() as conn:
         try:
             yield conn
@@ -56,7 +57,6 @@ async def get_connection(request: Request) -> AsyncIterator[AsyncConnection]:
 
 
 Conn = Annotated[AsyncConnection, Depends(get_connection)]
-Tx = Conn  # same object; the alias documents intent at write sites
 Settings = Annotated[BackendSettings, Depends(get_settings_dep)]
-Publisher = Annotated[PublicationPublisher, Depends(get_publisher)]
+Producer = Annotated[AsyncProducer, Depends(get_producer)]
 Store = Annotated[Storage, Depends(get_storage)]

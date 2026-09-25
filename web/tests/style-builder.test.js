@@ -36,20 +36,8 @@ test("per-resolution range beats the global range", () => {
     assert.deepEqual(rangeFor(realSpec, "h3_r12"), [1, 32]);
 });
 
-test("a layer with no per-layer entry for the colour field uses the global range", () => {
-    // `field_ranges_by_layer.centroids` exists but has no `count`, so the
-    // global range is the right answer rather than an accidental undefined.
+test("a layer without a resolution uses the global range", () => {
     assert.deepEqual(rangeFor(realSpec, "centroids"), [realSpec.style.min, realSpec.style.max]);
-});
-
-test("a per-layer range wins over the per-resolution one", () => {
-    const spec = {
-        style: { color_field: "count", min: 0, max: 1000 },
-        field_ranges_by_resolution: { 10: { count: { min: 1, max: 728 } } },
-        field_ranges_by_layer: { h3_r10: { count: { min: 5, max: 9 } } },
-    };
-
-    assert.deepEqual(rangeFor(spec, "h3_r10"), [5, 9]);
 });
 
 test("an unknown resolution falls back rather than throwing", () => {
@@ -144,26 +132,10 @@ test("each polygon layer is coloured against its own range", () => {
     assert.equal(stopsOf("h3_r10-fill").at(-1), 728);
 });
 
-// ------------------------------------------------------------------- fallback
-test("a spec without a layers array falls back to the archive's own metadata", () => {
-    // This is what makes a minimal spec (just a colour field) still render.
-    const layers = buildLayers(
-        { style: { color_field: "count", min: 0, max: 10 } },
-        {
-            vectorLayers: [
-                { id: "hexes", minzoom: 0, maxzoom: 12 },
-                { id: "centroids", minzoom: 12, maxzoom: 16 },
-            ],
-        },
-    );
-
-    const ids = layers.map((l) => l.id);
-    assert.ok(ids.includes("hexes-fill"));
-    assert.ok(ids.includes("centroids-circle"), "a layer named centroids is drawn as points");
-});
-
-test("a spec with neither layers nor metadata yields nothing to draw", () => {
-    assert.deepEqual(buildLayers({}, { vectorLayers: [] }), []);
+// ------------------------------------------------------------------- no spec
+test("a missing spec or one without layers yields nothing to draw", () => {
+    assert.deepEqual(buildLayers(null), []);
+    assert.deepEqual(buildLayers({ style: { color_field: "count" } }), []);
 });
 
 // -------------------------------------------------------------------- popups

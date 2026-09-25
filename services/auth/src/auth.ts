@@ -36,6 +36,9 @@ export function createAuth(config: Config, pool: Pool) {
       // the demo unusable. A real deployment turns this on.
       requireEmailVerification: false,
       minPasswordLength: 10,
+      // Tenants and users are provisioned (seed, users-cli), not self-served.
+      // Open sign-up would let anyone mint an account on the platform.
+      disableSignUp: true,
     },
 
     session: {

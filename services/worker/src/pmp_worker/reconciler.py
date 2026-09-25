@@ -17,18 +17,20 @@ claim or redoes work that lands in exactly the same place.
 from __future__ import annotations
 
 import threading
-from datetime import UTC, datetime, timedelta
-from typing import Any
+from datetime import timedelta
 
-from confluent_kafka import KafkaException, Producer
-from sqlalchemy import Engine, Row, and_, or_, select
+from confluent_kafka import Producer
+from sqlalchemy import Engine, and_, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from pmp_common.enums import JobStatus, Visibility
 from pmp_common.events import PublicationRequested, encode_event
-from pmp_common.logging import get_logger, log_context
+from pmp_common.kafka import TOPIC_REQUESTED
+from pmp_common.logging import get_logger
 from pmp_common.metrics import RECONCILER_REQUEUED
 from pmp_common.tables import datasets, publication_jobs
+
+from .outbox import KafkaMessage, produce_confirmed
 
 __all__ = ["Reconciler"]
 
@@ -41,16 +43,14 @@ class Reconciler:
         engine: Engine,
         producer: Producer,
         *,
-        topic: str,
         interval_seconds: float,
         stuck_pending_seconds: int,
         batch_size: int,
     ) -> None:
         self._engine = engine
         self._producer = producer
-        self._topic = topic
         self._interval = interval_seconds
-        self._stuck_after = stuck_pending_seconds
+        self._stuck_after = timedelta(seconds=stuck_pending_seconds)
         self._batch_size = batch_size
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -58,11 +58,7 @@ class Reconciler:
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, name="reconciler", daemon=True)
         self._thread.start()
-        log.info(
-            "reconciler.started",
-            interval=self._interval,
-            stuck_pending_seconds=self._stuck_after,
-        )
+        log.info("reconciler.started", interval=self._interval)
 
     def stop(self, timeout: float = 5.0) -> None:
         self._stop.set()
@@ -70,20 +66,15 @@ class Reconciler:
             self._thread.join(timeout=timeout)
 
     def _run(self) -> None:
-        # Stagger the first pass so several replicas do not all scan at once.
-        self._stop.wait(self._interval)
-        while not self._stop.is_set():
+        # Wait one interval first so several replicas do not all scan at once.
+        while not self._stop.wait(self._interval):
             try:
                 self.run_once()
             except SQLAlchemyError as exc:
                 log.warning("reconciler.error", error=str(exc))
-            self._stop.wait(self._interval)
 
     def run_once(self) -> int:
-        """Re-emit every recoverable job. Returns how many were re-emitted."""
-        now = datetime.now(UTC)
-        stuck_before = now - timedelta(seconds=self._stuck_after)
-
+        """Re-emit every recoverable job. Returns how many the broker acknowledged."""
         with self._engine.connect() as conn:
             rows = conn.execute(
                 select(
@@ -91,11 +82,8 @@ class Reconciler:
                     publication_jobs.c.tenant_id,
                     publication_jobs.c.dataset_id,
                     publication_jobs.c.source_key,
-                    publication_jobs.c.idempotency_key,
-                    publication_jobs.c.requested_by,
                     publication_jobs.c.attempts,
                     publication_jobs.c.status,
-                    datasets.c.slug,
                     datasets.c.visibility,
                 )
                 .select_from(
@@ -105,11 +93,11 @@ class Reconciler:
                     or_(
                         and_(
                             publication_jobs.c.status == JobStatus.PENDING.value,
-                            publication_jobs.c.updated_at < stuck_before,
+                            publication_jobs.c.updated_at < func.now() - self._stuck_after,
                         ),
                         and_(
                             publication_jobs.c.status == JobStatus.RUNNING.value,
-                            publication_jobs.c.lease_expires_at < now,
+                            publication_jobs.c.lease_expires_at < func.now(),
                         ),
                     )
                 )
@@ -117,42 +105,35 @@ class Reconciler:
                 .limit(self._batch_size)
             ).all()
 
-        requeued = 0
-        for row in rows:
-            reason = "stuck_pending" if row.status == JobStatus.PENDING.value else "expired_lease"
-            with log_context(job_id=str(row.id), dataset_id=str(row.dataset_id)):
-                if self._reemit(row):
-                    RECONCILER_REQUEUED.labels(reason).inc()
-                    requeued += 1
-                    log.warning(
-                        "reconciler.requeued",
-                        reason=reason,
-                        attempts=row.attempts,
-                        status=row.status,
+        messages = [
+            KafkaMessage(
+                topic=TOPIC_REQUESTED,
+                key=str(row.dataset_id).encode(),
+                value=encode_event(
+                    PublicationRequested(
+                        tenant_id=row.tenant_id,
+                        dataset_id=row.dataset_id,
+                        job_id=row.id,
+                        source_key=row.source_key,
+                        visibility=Visibility(row.visibility),
                     )
-        return requeued
-
-    def _reemit(self, row: Row[Any]) -> bool:
-        event = PublicationRequested(
-            tenant_id=row.tenant_id,
-            dataset_id=row.dataset_id,
-            job_id=row.id,
-            dataset_slug=row.slug,
-            source_key=row.source_key,
-            visibility=Visibility(row.visibility),
-            requested_by=row.requested_by,
-            idempotency_key=row.idempotency_key,
-            attempt=row.attempts + 1,
-        )
-        try:
-            self._producer.produce(
-                self._topic,
-                key=str(event.dataset_id).encode(),
-                value=encode_event(event),
+                ),
                 headers=[("x-reconciled", b"1")],
             )
-            self._producer.flush(10.0)
-        except (BufferError, KafkaException) as exc:
-            log.warning("reconciler.produce_failed", error=str(exc))
-            return False
-        return True
+            for row in rows
+        ]
+        delivered = produce_confirmed(self._producer, messages) if messages else []
+
+        for row, ok in zip(rows, delivered, strict=True):
+            if not ok:
+                continue
+            reason = "stuck_pending" if row.status == JobStatus.PENDING.value else "expired_lease"
+            RECONCILER_REQUEUED.labels(reason).inc()
+            log.warning(
+                "reconciler.requeued",
+                job_id=str(row.id),
+                dataset_id=str(row.dataset_id),
+                reason=reason,
+                attempts=row.attempts,
+            )
+        return sum(delivered)

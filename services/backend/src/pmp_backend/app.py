@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -15,8 +16,7 @@ from pmp_common.logging import configure_logging, get_logger
 from pmp_common.tracing import configure_tracing, instrument_fastapi, instrument_psycopg
 from pmp_common.web import create_app
 
-from .identity import build_identity_resolver
-from .publisher import PublicationPublisher
+from .identity import build_token_verifier
 from .routers import admin, datasets, demo, publications, tiles
 from .settings import BackendSettings, get_settings
 from .storage import Storage
@@ -41,7 +41,6 @@ def build_app(settings: BackendSettings | None = None) -> FastAPI:
         service=settings.service_name,
         version=settings.git_sha,
         endpoint=settings.observability.otlp_endpoint,
-        sample_ratio=settings.observability.trace_sample_ratio,
         environment=settings.environment,
     )
     instrument_psycopg()
@@ -52,7 +51,7 @@ def build_app(settings: BackendSettings | None = None) -> FastAPI:
         app.state.settings = settings
         app.state.engine = make_async_engine(settings.db, application_name="pmp-backend")
         app.state.storage = Storage(settings.s3, public_base_url=settings.public_base_url)
-        app.state.identity_resolver = build_identity_resolver(settings)
+        app.state.token_verifier = build_token_verifier(settings)
         # Only the backend holds the tile-cookie private key; the edge (and on
         # AWS, CloudFront) has only the public half.
         app.state.tile_signer = CloudFrontSigner.from_file(
@@ -62,23 +61,12 @@ def build_app(settings: BackendSettings | None = None) -> FastAPI:
         producer = AsyncProducer(settings.kafka, client_id=f"backend-{settings.git_sha}")
         producer.start()
         app.state.producer = producer
-        app.state.publisher = PublicationPublisher(
-            producer, topic=settings.kafka.topic_publication_requested
-        )
 
         log.info(
             "backend.started",
-            auth_mode=settings.auth_mode,
             demo_uploads=settings.demo_upload_enabled,
             environment=settings.environment,
         )
-        if settings.auth_mode == "dev_stub":
-            log.warning(
-                "backend.auth_disabled",
-                detail="BACKEND_AUTH_MODE=dev_stub: every request runs as a fixed identity",
-                user_id=settings.dev_stub_user_id,
-                tenant_id=settings.dev_stub_tenant_id,
-            )
         try:
             yield
         finally:
@@ -95,7 +83,8 @@ def build_app(settings: BackendSettings | None = None) -> FastAPI:
         """
         async with app.state.engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
-        if not app.state.producer.healthy():
+        # list_topics() blocks; keep it off the event loop.
+        if not await asyncio.to_thread(app.state.producer.healthy):
             raise RuntimeError("kafka producer cannot reach the cluster")
 
     app = create_app(

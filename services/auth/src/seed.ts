@@ -5,11 +5,12 @@
  * safe at any time. It prints the credentials because they are local-only demo
  * accounts — nothing here is a secret, and the README tells the reader so.
  */
+import { existsSync, writeFileSync } from "node:fs";
 import { createAuth, type TenantRole } from "./auth.js";
 import { loadConfig } from "./config.js";
 import { createPool } from "./db.js";
 import { logger } from "./logger.js";
-import type { Pool } from "pg";
+import { addTenant, addUser } from "./users-cli.js";
 
 interface SeedUser {
   email: string;
@@ -60,158 +61,75 @@ const USERS: SeedUser[] = [
 
 const API_KEY_NAME = "tenant-a-producer";
 
-async function userIdByEmail(pool: Pool, email: string): Promise<string | null> {
-  const result = await pool.query<{ id: string }>(
-    `SELECT id FROM "user" WHERE email = $1 LIMIT 1`,
-    [email],
-  );
-  return result.rows[0]?.id ?? null;
-}
-
-async function organizationIdBySlug(pool: Pool, slug: string): Promise<string | null> {
-  const result = await pool.query<{ id: string }>(
-    `SELECT id FROM "organization" WHERE slug = $1 LIMIT 1`,
-    [slug],
-  );
-  return result.rows[0]?.id ?? null;
-}
-
 async function main(): Promise<void> {
   const config = loadConfig();
   const pool = createPool(config);
   const auth = createAuth(config, pool);
 
-  // --- users ------------------------------------------------------------
-  // Sign-up goes through BetterAuth, because password hashing is its
-  // business and must not be reimplemented here.
-  const userIds = new Map<string, string>();
-  for (const user of USERS) {
-    let userId = await userIdByEmail(pool, user.email);
-    if (!userId) {
-      await auth.api.signUpEmail({
-        body: { email: user.email, password: user.password, name: user.name },
-      });
-      userId = await userIdByEmail(pool, user.email);
-      logger.info({ event: "seed.user_created", email: user.email });
-    }
-    if (!userId) throw new Error(`could not create user ${user.email}`);
-    userIds.set(user.email, userId);
-
-    // No mail server in this environment, so mark the address verified.
-    await pool.query(`UPDATE "user" SET "emailVerified" = true WHERE id = $1`, [userId]);
-    if (user.platformAdmin) {
-      await pool.query(`UPDATE "user" SET role = 'admin' WHERE id = $1`, [userId]);
-    }
-  }
-
-  // --- organizations and memberships ------------------------------------
-  // Written directly rather than through `auth.api.createOrganization`:
-  // that endpoint acts on behalf of a *session*, and it makes the caller an
-  // owner. The seed needs neither — it needs deterministic ids and a Bob who
-  // is only a `member`, so that tenant-role authorization is actually
-  // exercised by the tests.
+  // Deterministic ids (`org_<slug>`) and a Bob who is only a `member`, so that
+  // tenant-role authorization is actually exercised by the tests.
   const organizationIds = new Map<string, string>();
   for (const org of ORGANIZATIONS) {
-    let id = await organizationIdBySlug(pool, org.slug);
-    if (!id) {
-      id = `org_${org.slug}`;
-      await pool.query(
-        `INSERT INTO "organization" (id, name, slug, "createdAt")
-                 VALUES ($1, $2, $3, now())
-                 ON CONFLICT (slug) DO NOTHING`,
-        [id, org.name, org.slug],
-      );
-      id = await organizationIdBySlug(pool, org.slug);
-      logger.info({ event: "seed.organization_created", slug: org.slug });
-    }
-    if (!id) throw new Error(`could not create organization ${org.slug}`);
-    organizationIds.set(org.slug, id);
+    organizationIds.set(org.slug, await addTenant(pool, org.slug, org.name));
   }
 
+  const userIds = new Map<string, string>();
   for (const user of USERS) {
-    if (!user.organization || !user.role) continue;
-    const userId = userIds.get(user.email);
-    const organizationId = organizationIds.get(user.organization);
-    if (!userId || !organizationId) throw new Error(`cannot place ${user.email}`);
-
-    const existing = await pool.query(
-      `SELECT 1 FROM "member" WHERE "userId" = $1 AND "organizationId" = $2`,
-      [userId, organizationId],
-    );
-    if (existing.rowCount === 0) {
-      await pool.query(
-        `INSERT INTO "member" (id, "organizationId", "userId", role, "createdAt")
-                 VALUES ($1, $2, $3, $4, now())`,
-        [`mem_${organizationId}_${userId}`, organizationId, userId, user.role],
-      );
-      logger.info({
-        event: "seed.member_added",
-        email: user.email,
-        organization: user.organization,
-        role: user.role,
-      });
-    } else {
-      await pool.query(
-        `UPDATE "member" SET role = $3 WHERE "userId" = $1 AND "organizationId" = $2`,
-        [userId, organizationId, user.role],
-      );
-    }
+    const userId = await addUser(pool, auth, {
+      email: user.email,
+      password: user.password,
+      name: user.name,
+      tenantId: user.organization ? (organizationIds.get(user.organization) ?? null) : null,
+      role: user.role ?? "member",
+      platformAdmin: user.platformAdmin ?? false,
+    });
+    userIds.set(user.email, userId);
   }
-
-  // Give each tenant member an active organization, so signing in lands them
-  // somewhere useful instead of with tenant_id = null.
-  for (const user of USERS) {
-    const userId = userIds.get(user.email);
-    const organizationId = user.organization
-      ? organizationIds.get(user.organization)
-      : undefined;
-    if (!userId || !organizationId) continue;
-    await pool.query(
-      `UPDATE "session" SET "activeOrganizationId" = $2
-             WHERE "userId" = $1 AND "activeOrganizationId" IS NULL`,
-      [userId, organizationId],
-    );
-  }
+  logger.info({ event: "seed.users_ready", count: USERS.length });
 
   // --- producer API key -------------------------------------------------
-  const producerId = userIds.get("producer@tenant-a.test") ?? null;
+  // Keys are hashed at rest, so a key can only be shown when it is minted.
+  // It is written to PRODUCER_API_KEY_PATH (dev-keys/producer-api-key via
+  // `make seed`) for `make demo` and the e2e suite. If the key exists but the
+  // file does not, the key is replaced: an unrecoverable key is useless.
+  const producerId = userIds.get("producer@tenant-a.test");
   const tenantAId = organizationIds.get("tenant-a");
   if (!producerId || !tenantAId) throw new Error("producer user or tenant-a is missing");
 
-  let apiKeyValue: string | null = null;
-  // Keys are hashed at rest, so an existing one can never be shown again.
-  // ROTATE_API_KEY=1 deletes it and mints a replacement — which is also the
-  // supported way to revoke a leaked producer key.
-  if (process.env.ROTATE_API_KEY === "1") {
-    await pool.query(`DELETE FROM "apikey" WHERE "referenceId" = $1 AND name = $2`, [
-      producerId,
-      API_KEY_NAME,
-    ]);
-    logger.info({ event: "seed.api_key_rotated", name: API_KEY_NAME });
-  }
-
+  const keyPath = process.env.PRODUCER_API_KEY_PATH;
   const existingKey = await pool.query(
     `SELECT 1 FROM "apikey" WHERE "referenceId" = $1 AND name = $2`,
     [producerId, API_KEY_NAME],
   );
-  if (existingKey.rowCount === 0) {
+  let apiKeyValue: string | null = null;
+  if (existingKey.rowCount === 0 || (keyPath && !existsSync(keyPath))) {
+    await pool.query(`DELETE FROM "apikey" WHERE "referenceId" = $1 AND name = $2`, [
+      producerId,
+      API_KEY_NAME,
+    ]);
     const created = await auth.api.createApiKey({
       body: {
         userId: producerId,
         name: API_KEY_NAME,
-        // Binds the key to one organization; `/internal/verify` reads
-        // this to decide which tenant the producer acts as.
+        // Selects the organization the producer acts as; `/internal/verify`
+        // honours it only because the producer is a member of it.
         metadata: { tenant_id: tenantAId },
       },
     });
-    apiKeyValue = created?.key ?? null;
+    apiKeyValue = created.key;
+    if (keyPath) writeFileSync(keyPath, `${apiKeyValue}\n`, { mode: 0o600 });
+    logger.info({ event: "seed.api_key_minted", name: API_KEY_NAME, file: keyPath ?? null });
   }
 
   await pool.end();
-  print(organizationIds, apiKeyValue);
+  print(organizationIds, apiKeyValue, keyPath);
 }
 
-function print(organizationIds: Map<string, string>, apiKey: string | null): void {
+function print(
+  organizationIds: Map<string, string>,
+  apiKey: string | null,
+  keyPath: string | undefined,
+): void {
   const line = "─".repeat(72);
   const rows = USERS.map((u) => ({
     email: u.email,
@@ -236,15 +154,11 @@ function print(organizationIds: Map<string, string>, apiKey: string | null): voi
   if (apiKey) {
     process.stdout.write(`  ${apiKey}\n`);
     process.stdout.write(`  Use it as:  x-api-key: ${apiKey}\n`);
-    process.stdout.write(
-      "  This is the only time it is shown; re-run `make seed-rotate`\n" +
-        "  to mint a new one.\n",
-    );
   } else {
-    process.stdout.write(
-      "  (already exists — the value is hashed at rest and cannot be shown again)\n",
-    );
+    process.stdout.write("  (unchanged — the value is hashed at rest)\n");
   }
+  if (keyPath)
+    process.stdout.write(`  Stored in ${keyPath}; delete the file to mint a new key.\n`);
   process.stdout.write(`${line}\n\n`);
 }
 

@@ -1,5 +1,6 @@
 /**
- * Operator CLI for tenants and users.
+ * Operator CLI for tenants and users, and the provisioning helpers the seed
+ * reuses.
  *
  *   node dist/users-cli.js add-tenant <slug> [name]
  *   node dist/users-cli.js add-user <email> <password> [--tenant <slug>] [--role owner|admin|member]
@@ -8,16 +9,27 @@
  *
  * Wrapped by `make add-tenant`, `make add-user` and `make list-users`.
  *
- * Users are created through BetterAuth (it owns password hashing);
- * memberships are written directly, for the same reason as in the seed: the
- * organization endpoints act on behalf of a session and make the caller an
- * owner. Re-running is safe — an existing user keeps their password and just
- * gains the membership/role requested.
+ * Public sign-up is disabled, so users are created with the admin plugin's
+ * server-side `createUser` (BetterAuth owns password hashing). Memberships are
+ * written directly: the organization endpoints act on behalf of a session and
+ * make the caller an owner. Re-running is safe — an existing user keeps their
+ * password and just gains the membership/role requested.
  */
 import type { Pool } from "pg";
-import { createAuth, TENANT_ROLES, type TenantRole } from "./auth.js";
+import { pathToFileURL } from "node:url";
+import { createAuth, TENANT_ROLES, type Auth, type TenantRole } from "./auth.js";
 import { loadConfig } from "./config.js";
 import { createPool } from "./db.js";
+
+export interface NewUser {
+  email: string;
+  password: string;
+  name: string;
+  /** Organization id (not slug) to add the user to, if any. */
+  tenantId: string | null;
+  role: TenantRole;
+  platformAdmin: boolean;
+}
 
 function usage(message?: string): never {
   if (message) process.stderr.write(`error: ${message}\n\n`);
@@ -54,34 +66,60 @@ function parseFlags(args: string[]): {
   return { positional, flags };
 }
 
-async function organizationId(pool: Pool, slug: string): Promise<string | null> {
+export async function organizationId(pool: Pool, slug: string): Promise<string | null> {
   const r = await pool.query<{ id: string }>(`SELECT id FROM "organization" WHERE slug = $1`, [
     slug,
   ]);
   return r.rows[0]?.id ?? null;
 }
 
-async function addTenant(pool: Pool, slug: string, name: string): Promise<string> {
-  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(slug)) usage(`invalid tenant slug '${slug}'`);
+/** Create the tenant if it does not exist; returns its id (`org_<slug>`). */
+export async function addTenant(pool: Pool, slug: string, name: string): Promise<string> {
+  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(slug)) throw new Error(`invalid tenant slug '${slug}'`);
   const existing = await organizationId(pool, slug);
-  if (existing) {
-    process.stdout.write(`tenant '${slug}' already exists (${existing})\n`);
-    return existing;
-  }
+  if (existing) return existing;
   const id = `org_${slug}`;
   await pool.query(
     `INSERT INTO "organization" (id, name, slug, "createdAt") VALUES ($1, $2, $3, now())`,
     [id, name, slug],
   );
-  process.stdout.write(`created tenant '${slug}' (${id})\n`);
   return id;
 }
 
-async function addUser(
-  pool: Pool,
-  auth: ReturnType<typeof createAuth>,
-  args: string[],
-): Promise<void> {
+/** Create the user if missing, then apply the platform role and membership. */
+export async function addUser(pool: Pool, auth: Auth, user: NewUser): Promise<string> {
+  const found = await pool.query<{ id: string }>(`SELECT id FROM "user" WHERE email = $1`, [
+    user.email.toLowerCase(),
+  ]);
+  let userId = found.rows[0]?.id;
+  if (!userId) {
+    const created = await auth.api.createUser({
+      body: {
+        email: user.email,
+        password: user.password,
+        name: user.name,
+        role: user.platformAdmin ? "admin" : "user",
+        // No mail server in this environment.
+        data: { emailVerified: true },
+      },
+    });
+    userId = created.user.id;
+  } else if (user.platformAdmin) {
+    await pool.query(`UPDATE "user" SET role = 'admin' WHERE id = $1`, [userId]);
+  }
+
+  if (user.tenantId) {
+    await pool.query(
+      `INSERT INTO "member" (id, "organizationId", "userId", role, "createdAt")
+       VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (id) DO UPDATE SET role = EXCLUDED.role`,
+      [`mem_${user.tenantId}_${userId}`, user.tenantId, userId, user.role],
+    );
+  }
+  return userId;
+}
+
+async function addUserCommand(pool: Pool, auth: Auth, args: string[]): Promise<void> {
   const { positional, flags } = parseFlags(args);
   const [email, password] = positional;
   if (!email || !password) usage("add-user needs <email> <password>");
@@ -90,45 +128,23 @@ async function addUser(
   const role = (flags.role ?? "member") as TenantRole;
   if (!TENANT_ROLES.includes(role)) usage(`role must be one of ${TENANT_ROLES.join(", ")}`);
   const tenant = typeof flags.tenant === "string" ? flags.tenant : null;
-  const name = typeof flags.name === "string" ? flags.name : email.split("@")[0]!;
+  const tenantId = tenant ? await organizationId(pool, tenant) : null;
+  if (tenant && !tenantId)
+    usage(`tenant '${tenant}' does not exist — create it with add-tenant first`);
 
-  let tenantId: string | null = null;
-  if (tenant) {
-    tenantId = await organizationId(pool, tenant);
-    if (!tenantId) usage(`tenant '${tenant}' does not exist — create it with add-tenant first`);
-  }
-
-  const found = await pool.query<{ id: string }>(`SELECT id FROM "user" WHERE email = $1`, [
+  const platformAdmin = flags["platform-admin"] === true;
+  await addUser(pool, auth, {
     email,
-  ]);
-  let userId = found.rows[0]?.id;
-  if (userId) {
-    process.stdout.write(`user ${email} already exists; password unchanged\n`);
-  } else {
-    await auth.api.signUpEmail({ body: { email, password, name } });
-    userId = (
-      await pool.query<{ id: string }>(`SELECT id FROM "user" WHERE email = $1`, [email])
-    ).rows[0]?.id;
-    if (!userId) throw new Error(`could not create ${email}`);
-    // No mail server in this environment.
-    await pool.query(`UPDATE "user" SET "emailVerified" = true WHERE id = $1`, [userId]);
-    process.stdout.write(`created user ${email}\n`);
-  }
-
-  if (flags["platform-admin"]) {
-    await pool.query(`UPDATE "user" SET role = 'admin' WHERE id = $1`, [userId]);
-    process.stdout.write(`  granted platform admin\n`);
-  }
-
-  if (tenantId) {
-    await pool.query(
-      `INSERT INTO "member" (id, "organizationId", "userId", role, "createdAt")
-       VALUES ($1, $2, $3, $4, now())
-       ON CONFLICT (id) DO UPDATE SET role = EXCLUDED.role`,
-      [`mem_${tenantId}_${userId}`, tenantId, userId, role],
-    );
-    process.stdout.write(`  ${role} of tenant '${tenant}'\n`);
-  } else if (!flags["platform-admin"]) {
+    password,
+    name: typeof flags.name === "string" ? flags.name : email.split("@")[0]!,
+    tenantId,
+    role,
+    platformAdmin,
+  });
+  process.stdout.write(`user ${email} ready\n`);
+  if (platformAdmin) process.stdout.write("  platform admin\n");
+  if (tenantId) process.stdout.write(`  ${role} of tenant '${tenant}'\n`);
+  else if (!platformAdmin) {
     process.stdout.write(
       "  note: no --tenant given; this user can sign in and read public datasets,\n" +
         "  but cannot publish until added to a tenant.\n",
@@ -160,11 +176,12 @@ async function main(): Promise<void> {
       case "add-tenant": {
         const [slug, ...name] = args;
         if (!slug) usage("add-tenant needs <slug>");
-        await addTenant(pool, slug, name.join(" ") || slug);
+        const id = await addTenant(pool, slug, name.join(" ") || slug);
+        process.stdout.write(`tenant '${slug}' ready (${id})\n`);
         break;
       }
       case "add-user":
-        await addUser(pool, createAuth(config, pool), args);
+        await addUserCommand(pool, createAuth(config, pool), args);
         break;
       case "list":
         await list(pool);
@@ -177,8 +194,11 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error: unknown) => {
-  const err = error as Error & { body?: unknown };
-  process.stderr.write(`error: ${err.message} ${err.body ? JSON.stringify(err.body) : ""}\n`);
-  process.exit(1);
-});
+// Run only when executed directly; the seed imports the helpers above.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error: unknown) => {
+    const err = error as Error & { body?: unknown };
+    process.stderr.write(`error: ${err.message} ${err.body ? JSON.stringify(err.body) : ""}\n`);
+    process.exit(1);
+  });
+}

@@ -16,9 +16,6 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "3"
 
-x-restart: &default-restart
-  restart: unless-stopped
-
 # Settings every Python service reads. Individual services add their own
 # credentials on top of this.
 x-common-env: &common-env
@@ -40,9 +37,6 @@ x-kafka-env: &kafka-env
   KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
   KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}
   KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-none}
-  KAFKA_TOPIC_PUBLICATION_REQUESTED: ${KAFKA_TOPIC_PUBLICATION_REQUESTED:-publication.requested}
-  KAFKA_TOPIC_PUBLICATION_RESULTS: ${KAFKA_TOPIC_PUBLICATION_RESULTS:-publication.results}
-  KAFKA_TOPIC_PUBLICATION_DLQ: ${KAFKA_TOPIC_PUBLICATION_DLQ:-publication.requested.dlq}
 
 x-s3-env: &s3-env
   S3_ENDPOINT: ${S3_ENDPOINT:-http://s3:9000}
@@ -57,24 +51,22 @@ services:
   # =======================================================================
   postgres:
     image: postgres:16.11-alpine
-    <<: *default-restart
+    restart: unless-stopped
     logging: *default-logging
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-pmtiles}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_DB: pmtiles
+      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       # Deterministic collation so index behaviour matches RDS.
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
     command:
       - postgres
       - -c
-      - max_connections=100
-      - -c
       - log_min_duration_statement=500
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-pmtiles}"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pmtiles"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -85,7 +77,7 @@ services:
     # Redpanda: Kafka-compatible, single binary, no ZooKeeper. Stands in for
     # Amazon MSK; the clients speak plain Kafka protocol either way.
     image: docker.redpanda.com/redpandadata/redpanda:v25.3.2
-    <<: *default-restart
+    restart: unless-stopped
     logging: *default-logging
     command:
       - redpanda
@@ -98,7 +90,6 @@ services:
       - --advertise-kafka-addr=PLAINTEXT://kafka:9092
       - --rpc-addr=0.0.0.0:33145
       - --advertise-rpc-addr=kafka:33145
-      - --schema-registry-addr=0.0.0.0:8081
     volumes:
       - kafka-data:/var/lib/redpanda/data
     healthcheck:
@@ -113,7 +104,7 @@ services:
     # MinIO stands in for Amazon S3. Pulled from quay.io: the Docker Hub
     # mirror is no longer published.
     image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
-    <<: *default-restart
+    restart: unless-stopped
     logging: *default-logging
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
@@ -143,10 +134,6 @@ services:
     entrypoint: ["/bin/bash", "/scripts/kafka-init.sh"]
     environment:
       KAFKA_BROKERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
-      TOPIC_REQUESTED: ${KAFKA_TOPIC_PUBLICATION_REQUESTED:-publication.requested}
-      TOPIC_RESULTS: ${KAFKA_TOPIC_PUBLICATION_RESULTS:-publication.results}
-      TOPIC_DLQ: ${KAFKA_TOPIC_PUBLICATION_DLQ:-publication.requested.dlq}
-      TOPIC_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS:-6}
     volumes:
       - ./ops/kafka:/scripts:ro
     networks: [pmp]
@@ -233,7 +220,7 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-dev}
     image: pmp/auth:${GIT_SHA:-dev}
-    <<: *default-restart
+    restart: unless-stopped
     logging: *default-logging
     depends_on:
       postgres:
@@ -266,7 +253,7 @@ services:
         HEALTH_PORT: "8000"
         GIT_SHA: ${GIT_SHA:-dev}
     image: pmp/backend:${GIT_SHA:-dev}
-    <<: *default-restart
+    restart: unless-stopped
     logging: *default-logging
     depends_on:
       postgres: {condition: service_healthy}
@@ -282,9 +269,6 @@ services:
       DB_PASSWORD: ${BACKEND_DB_PASSWORD:?}
       S3_ACCESS_KEY_ID: ${BACKEND_S3_ACCESS_KEY:?}
       S3_SECRET_ACCESS_KEY: ${BACKEND_S3_SECRET_KEY:?}
-      BACKEND_AUTH_MODE: ${BACKEND_AUTH_MODE:-internal_jwt}
-      BACKEND_DEV_USER_ID: ${BACKEND_DEV_USER_ID:-dev-user}
-      BACKEND_DEV_TENANT_ID: ${BACKEND_DEV_TENANT_ID:-dev-tenant}
       INTERNAL_JWT_PUBLIC_KEY_PATH: /run/keys/internal-jwt.pub
       DEMO_UPLOAD_ENABLED: ${DEMO_UPLOAD_ENABLED:-false}
       CLOUDFRONT_PRIVATE_KEY_PATH: /run/keys/cloudfront.key
@@ -305,7 +289,7 @@ services:
         HEALTH_PORT: "9100"
         GIT_SHA: ${GIT_SHA:-dev}
     image: pmp/worker:${GIT_SHA:-dev}
-    <<: *default-restart
+    restart: unless-stopped
     logging: *default-logging
     # Scale with replicas: each process handles one job at a time.
     # `docker compose up -d --scale worker=3`
@@ -352,7 +336,7 @@ services:
         HEALTH_PORT: "8000"
         GIT_SHA: ${GIT_SHA:-dev}
     image: pmp/gateway:${GIT_SHA:-dev}
-    <<: *default-restart
+    restart: unless-stopped
     logging: *default-logging
     depends_on:
       auth: {condition: service_healthy}
@@ -365,8 +349,6 @@ services:
       BACKEND_BASE_URL: ${BACKEND_BASE_URL:-http://backend:8000}
       INTERNAL_JWT_PRIVATE_KEY_PATH: /run/keys/internal-jwt.key
       GATEWAY_VERIFY_CACHE_TTL: ${GATEWAY_VERIFY_CACHE_TTL:-10}
-      GATEWAY_RATE_LIMIT_RPS: ${GATEWAY_RATE_LIMIT_RPS:-20}
-      GATEWAY_RATE_LIMIT_BURST: ${GATEWAY_RATE_LIMIT_BURST:-40}
     volumes:
       - ./dev-keys:/run/keys:ro
       - ./services/gateway/routes.yaml:/app/routes.yaml:ro
@@ -385,7 +367,7 @@ services:
         HEALTH_PORT: "8000"
         GIT_SHA: ${GIT_SHA:-dev}
     image: pmp/edge-verifier:${GIT_SHA:-dev}
-    <<: *default-restart
+    restart: unless-stopped
     logging: *default-logging
     environment:
       <<: *common-env
@@ -404,7 +386,7 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-dev}
     image: pmp/edge:${GIT_SHA:-dev}
-    <<: *default-restart
+    restart: unless-stopped
     logging: *default-logging
     depends_on:
       s3: {condition: service_healthy}
@@ -420,6 +402,7 @@ services:
       EDGE_VERIFIER_UPSTREAM: ${EDGE_VERIFIER_BASE_URL:-http://edge-verifier:8000}
       EDGE_OTEL_TRACE: ${EDGE_OTEL_TRACE:-off}
       EDGE_OTEL_ENDPOINT: ${EDGE_OTEL_ENDPOINT:-jaeger:4317}
+      DEMO_UPLOAD_ENABLED: ${DEMO_UPLOAD_ENABLED:-false}
       NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/conf.d
     ports:
       - "127.0.0.1:${EDGE_HTTP_PORT:-8080}:80"
@@ -430,7 +413,7 @@ services:
   # =======================================================================
   kafka-console:
     image: docker.redpanda.com/redpandadata/console:v3.5.0
-    <<: *default-restart
+    restart: unless-stopped
     logging: *default-logging
     depends_on:
       kafka:
@@ -450,12 +433,11 @@ services:
   prometheus:
     image: prom/prometheus:v3.7.3
     profiles: [observability]
-    <<: *default-restart
+    restart: unless-stopped
     logging: *default-logging
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=2d
-      - --web.enable-lifecycle
     volumes:
       - ./ops/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -471,7 +453,7 @@ services:
   grafana:
     image: grafana/grafana:12.3.0
     profiles: [observability]
-    <<: *default-restart
+    restart: unless-stopped
     logging: *default-logging
     depends_on:
       prometheus: {condition: service_healthy}
@@ -499,7 +481,7 @@ services:
     # Jaeger v2: accepts OTLP directly on 4317 (gRPC) / 4318 (HTTP).
     image: jaegertracing/jaeger:2.21.0
     profiles: [observability]
-    <<: *default-restart
+    restart: unless-stopped
     logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:16686/ >/dev/null || exit 1"]

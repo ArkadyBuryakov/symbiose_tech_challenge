@@ -74,6 +74,8 @@ def upgrade() -> None:
         sa.Column("dataset_id", sa.Uuid(), nullable=False),
         sa.Column("seq", sa.Integer(), nullable=False),
         sa.Column("sha256", sa.Text(), nullable=False),
+        sa.Column("spec_sha256", sa.Text(), nullable=False,
+                  comment="SHA-256 of the canonical JSON spec; part of the version's identity."),
         sa.Column("size_bytes", sa.BigInteger(), nullable=False),
         sa.Column("object_key", sa.Text(), nullable=False,
                   comment="Immutable content-addressed key in the publish bucket."),
@@ -93,6 +95,7 @@ def upgrade() -> None:
         sa.CheckConstraint("seq >= 1", name="versions_seq_check"),
         sa.CheckConstraint("size_bytes >= 0", name="versions_size_check"),
         sa.CheckConstraint("sha256 ~ '^[0-9a-f]{64}$'", name="versions_sha256_check"),
+        sa.CheckConstraint("spec_sha256 ~ '^[0-9a-f]{64}$'", name="versions_spec_sha256_check"),
         sa.ForeignKeyConstraint(
             ["dataset_id"], [f"{SCHEMA}.datasets.id"],
             name="versions_dataset_fk", ondelete="CASCADE",
@@ -100,13 +103,13 @@ def upgrade() -> None:
         sa.UniqueConstraint("dataset_id", "seq", name="versions_dataset_seq_key"),
         schema=SCHEMA,
     )
-    # One live version row per content hash per dataset. This is what makes a
+    # One live version row per (bytes, spec) per dataset. This is what makes a
     # redelivered Kafka message (or a concurrent duplicate) unable to create a
-    # second version for the same bytes: the second insert violates the index.
+    # second version for the same content: the second insert violates the index.
     op.create_index(
-        "versions_dataset_sha_live_key",
+        "versions_dataset_key_live_key",
         "dataset_versions",
-        ["dataset_id", "sha256"],
+        ["dataset_id", "sha256", "spec_sha256"],
         unique=True,
         schema=SCHEMA,
         postgresql_where=sa.text("status <> 'RETIRED'"),
@@ -200,7 +203,6 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
                   server_default=sa.text("now()")),
         sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),
         schema=SCHEMA,
     )
     # The relay only ever scans unsent rows; a partial index keeps that scan

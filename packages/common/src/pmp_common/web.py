@@ -16,9 +16,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
+from structlog.contextvars import clear_contextvars
 
 from .ids import new_uuid
-from .logging import bind_log_context, clear_log_context, get_logger
+from .logging import bind_log_context, get_logger
 from .metrics import CONTENT_TYPE_LATEST, HTTP_REQUEST_DURATION, HTTP_REQUESTS, render_metrics
 from .problem import CONTENT_TYPE, AppError, problem_dict
 
@@ -77,7 +78,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         request_id = request.headers.get(REQUEST_ID_HEADER) or str(new_uuid())
         request.state.request_id = request_id
-        clear_log_context()
+        clear_contextvars()
         bind_log_context(request_id=request_id)
 
         started = time.perf_counter()
@@ -116,7 +117,6 @@ def create_app(
     service: str,
     version: str = "unknown",
     readiness: ReadinessCheck | None = None,
-    expose_metrics: bool = True,
     **fastapi_kwargs: Any,
 ) -> FastAPI:
     """Build a FastAPI app with the platform's standard behaviour."""
@@ -126,16 +126,15 @@ def create_app(
 
     @app.exception_handler(AppError)
     async def _app_error(request: Request, exc: AppError) -> JSONResponse:
-        problem = exc.to_problem(
-            instance=str(request.url.path), request_id=request_id_of(request) or None
-        )
         if exc.status >= 500:
             log.error("request.failed", code=exc.code, detail=exc.detail)
-        return JSONResponse(
-            problem.model_dump(exclude_none=True),
-            status_code=exc.status,
-            media_type=CONTENT_TYPE,
-            headers={REQUEST_ID_HEADER: request_id_of(request)},
+        return problem_response(
+            request,
+            status=exc.status,
+            title=exc.title,
+            code=exc.code,
+            detail=exc.detail,
+            **exc.extra,
         )
 
     @app.exception_handler(StarletteHTTPException)
@@ -190,10 +189,8 @@ def create_app(
             return JSONResponse({"status": "unavailable", "detail": str(exc)}, status_code=503)
         return JSONResponse({"status": "ok"})
 
-    if expose_metrics:
-
-        @app.get("/metrics", include_in_schema=False)
-        async def metrics() -> Response:
-            return PlainTextResponse(render_metrics(), media_type=CONTENT_TYPE_LATEST)
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics() -> Response:
+        return PlainTextResponse(render_metrics(), media_type=CONTENT_TYPE_LATEST)
 
     return app

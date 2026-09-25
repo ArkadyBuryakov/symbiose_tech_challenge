@@ -60,7 +60,14 @@ _FROM_CF = str.maketrans({"-": "+", "_": "=", "~": "/"})
 
 
 class PolicyError(Exception):
-    """The presented policy is missing, malformed, expired or out of scope."""
+    """The presented policy is missing, malformed, expired or out of scope.
+
+    ``reason`` is a short, low-cardinality label for metrics and logs.
+    """
+
+    def __init__(self, message: str, *, reason: str) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 def cf_b64encode(data: bytes) -> str:
@@ -189,15 +196,15 @@ class CloudFrontVerifier:
         policy they wrote.
         """
         if not policy_b64 or not signature_b64:
-            raise PolicyError("signed tile cookies are missing")
+            raise PolicyError("signed tile cookies are missing", reason="missing")
         if self._key_pair_id is not None and key_pair_id != self._key_pair_id:
-            raise PolicyError("unknown key pair id")
+            raise PolicyError("unknown key pair id", reason="unknown_key")
 
         try:
             policy_bytes = cf_b64decode(policy_b64)
             signature = cf_b64decode(signature_b64)
         except (ValueError, TypeError) as exc:
-            raise PolicyError("signed tile cookies are malformed") from exc
+            raise PolicyError("signed tile cookies are malformed", reason="malformed") from exc
 
         try:
             self._key.verify(
@@ -207,7 +214,9 @@ class CloudFrontVerifier:
                 hashes.SHA1(),  # noqa: S303 - mandated by the CloudFront cookie format
             )
         except InvalidSignature as exc:
-            raise PolicyError("signature does not match the policy") from exc
+            raise PolicyError(
+                "signature does not match the policy", reason="bad_signature"
+            ) from exc
 
         try:
             policy = json.loads(policy_bytes)
@@ -215,15 +224,17 @@ class CloudFrontVerifier:
             resource = str(statement["Resource"])
             expires = int(statement["Condition"]["DateLessThan"]["AWS:EpochTime"])
         except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise PolicyError("policy is not a well-formed CloudFront policy") from exc
+            raise PolicyError(
+                "policy is not a well-formed CloudFront policy", reason="malformed"
+            ) from exc
 
         moment = now or datetime.now(UTC)
         if moment.timestamp() >= expires:
-            raise PolicyError("policy has expired")
+            raise PolicyError("policy has expired", reason="expired")
 
         if not resource_matches(resource, url):
             # The signature is valid but the policy does not cover this object:
             # this is the tenant-isolation check.
-            raise PolicyError("policy does not cover the requested object")
+            raise PolicyError("policy does not cover the requested object", reason="out_of_scope")
 
         return {"resource": resource, "expires_at": expires}

@@ -39,7 +39,6 @@ def main() -> int:
         service=settings.service_name,
         version=settings.git_sha,
         endpoint=settings.observability.otlp_endpoint,
-        sample_ratio=settings.observability.trace_sample_ratio,
         environment=settings.environment,
     )
     instrument_psycopg()
@@ -85,12 +84,11 @@ def main() -> int:
     reconciler = Reconciler(
         engine,
         producer,
-        topic=settings.kafka.topic_publication_requested,
         interval_seconds=settings.reconciler_interval_seconds,
         stuck_pending_seconds=settings.stuck_pending_seconds,
         batch_size=settings.reconciler_batch,
     )
-    runner = Runner(settings, engine, storage, producer=producer)
+    runner = Runner(settings, engine, storage, producer)
     runner.install_signal_handlers()
 
     health.start()

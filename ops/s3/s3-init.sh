@@ -63,12 +63,6 @@ cat >/tmp/policy-backend.json <<JSON
       "Effect": "Allow",
       "Action": ["s3:PutObject"],
       "Resource": ["arn:aws:s3:::${STAGING}/*"]
-    },
-    {
-      "Sid": "InspectStagedObject",
-      "Effect": "Allow",
-      "Action": ["s3:GetObject"],
-      "Resource": ["arn:aws:s3:::${STAGING}/*"]
     }
   ]
 }

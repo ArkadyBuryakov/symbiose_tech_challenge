@@ -135,18 +135,19 @@ async function verifySession(
   const tenantId =
     session.activeOrganizationId ?? (await soleOrganizationOf(pool, result.user.id));
 
-  const [tenantRole, platformRole] = await Promise.all([
-    tenantRoleOf(pool, result.user.id, tenantId),
-    platformRoleOf(pool, result.user.id),
-  ]);
+  const tenantRole = await tenantRoleOf(pool, result.user.id, tenantId);
+  // The admin plugin puts the platform role on the user row, which getSession
+  // already returned.
+  const user = result.user as typeof result.user & { role?: string | null };
 
   return {
     user_id: result.user.id,
     // A signed-in user with no active organization is a valid identity; the
-    // backend is what refuses them on tenant-scoped endpoints.
-    tenant_id: tenantId,
+    // backend is what refuses them on tenant-scoped endpoints. A tenant the
+    // user is not (or no longer) a member of is treated the same way.
+    tenant_id: tenantRole ? tenantId : null,
     tenant_role: tenantRole,
-    platform_role: platformRole,
+    platform_role: user.role === "admin" ? "admin" : null,
     auth_method: "session",
     session_expires_at: new Date(session.expiresAt).toISOString(),
   };
@@ -172,7 +173,10 @@ async function verifyApiKey(
 
   return {
     user_id: userId,
-    tenant_id: tenantId,
+    // Key metadata is client-writable (anyone signed in can create a key with
+    // any metadata), so it only *selects* a tenant: the key's owner must be a
+    // member of it, or the key acts as nobody's tenant.
+    tenant_id: tenantRole ? tenantId : null,
     tenant_role: tenantRole,
     platform_role: platformRole,
     auth_method: "api_key",

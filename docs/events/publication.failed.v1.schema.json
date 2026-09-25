@@ -1,17 +1,14 @@
 {
   "$defs": {
     "ErrorCode": {
-      "description": "Stable, machine-readable failure reasons recorded on a job.\n\n``PERMANENT_*`` codes never retry; anything else is treated as transient by\nthe worker and retried with backoff before being dead-lettered.",
+      "description": "Stable, machine-readable failure reasons recorded on a job.\n\nWhether a failure is retried is decided by the worker's exception type\n(``PermanentJobError`` vs ``TransientJobError``), not by the code.",
       "enum": [
         "SOURCE_NOT_FOUND",
         "SOURCE_FORBIDDEN",
         "TENANT_MISMATCH",
         "INVALID_PMTILES",
-        "UNSUPPORTED_PMTILES_VERSION",
         "EMPTY_SOURCE",
-        "DATASET_NOT_FOUND",
         "STORAGE_ERROR",
-        "DATABASE_ERROR",
         "MAX_ATTEMPTS_EXCEEDED",
         "INTERNAL_ERROR"
       ],

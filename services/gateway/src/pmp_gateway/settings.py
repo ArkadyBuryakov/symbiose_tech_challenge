@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import Field, model_validator
+from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
 from pmp_common.config import ServiceSettings
@@ -53,19 +53,6 @@ class GatewaySettings(ServiceSettings):
             "how long a revoked session keeps working against the API."
         ),
     )
-    verify_cache_max_entries: int = Field(
-        default=10_000, ge=16, validation_alias="GATEWAY_VERIFY_CACHE_MAX"
-    )
-    verify_timeout_seconds: float = Field(
-        default=3.0, ge=0.5, validation_alias="GATEWAY_VERIFY_TIMEOUT"
-    )
-
-    # --- rate limiting ----------------------------------------------------
-    rate_limit_rps: float = Field(default=20.0, ge=0.1, validation_alias="GATEWAY_RATE_LIMIT_RPS")
-    rate_limit_burst: int = Field(default=40, ge=1, validation_alias="GATEWAY_RATE_LIMIT_BURST")
-    rate_limit_max_buckets: int = Field(
-        default=50_000, ge=16, validation_alias="GATEWAY_RATE_LIMIT_MAX_BUCKETS"
-    )
 
     # --- proxy ------------------------------------------------------------
     connect_timeout_seconds: float = Field(
@@ -74,19 +61,6 @@ class GatewaySettings(ServiceSettings):
     read_timeout_seconds: float = Field(
         default=30.0, ge=1.0, validation_alias="GATEWAY_READ_TIMEOUT"
     )
-    max_connections: int = Field(default=200, ge=1, validation_alias="GATEWAY_MAX_CONNECTIONS")
-    max_keepalive_connections: int = Field(
-        default=50, ge=1, validation_alias="GATEWAY_MAX_KEEPALIVE"
-    )
-
-    @model_validator(mode="after")
-    def _keepalive_within_max(self) -> GatewaySettings:
-        if self.max_keepalive_connections > self.max_connections:
-            raise ValueError(
-                "GATEWAY_MAX_KEEPALIVE cannot exceed GATEWAY_MAX_CONNECTIONS "
-                f"({self.max_keepalive_connections} > {self.max_connections})"
-            )
-        return self
 
     def upstream_url(self, name: str) -> str:
         urls = {"auth": self.auth_base_url, "backend": self.backend_base_url}

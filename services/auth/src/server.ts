@@ -45,16 +45,14 @@ export function createServer(config: Config, pool: Pool): Hono {
     }
   });
 
-  // BetterAuth owns everything under /api/auth. The gateway forwards these
+  // BetterAuth owns everything under /api/auth (including its built-in
+  // `GET /api/auth/ok` probe). The gateway forwards these
   // requests verbatim — including every Set-Cookie on the way back — because
   // the session cookie is the browser's credential and nothing else may
   // rewrite it.
   app.on(["GET", "POST", "PUT", "DELETE", "OPTIONS"], "/api/auth/*", (c) =>
     auth.handler(c.req.raw),
   );
-
-  // A cheap probe the demo script uses to find out whether auth is wired up.
-  app.get("/api/auth/ok", (c) => c.json({ status: "ok" }));
 
   // Never routed publicly: the gateway is the only caller.
   registerVerifyRoute(app, auth, pool);

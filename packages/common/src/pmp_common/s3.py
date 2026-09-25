@@ -7,7 +7,7 @@ default credential chain (EKS Pod Identity). No code changes.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from .config import S3Settings
@@ -31,26 +31,15 @@ PMTILES_CONTENT_TYPE = "application/vnd.pmtiles"
 IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
-def make_s3_client(
-    settings: S3Settings,
-    *,
-    signature_version: str = "s3v4",
-    addressing_style: Literal["path", "virtual", "auto"] | None = None,
-    max_attempts: int = 5,
-) -> S3Client:
-    """Build a boto3 S3 client from settings.
-
-    ``signature_version`` is exposed because presigned URLs and normal calls can
-    need different signers; everything here uses SigV4.
-    """
+def make_s3_client(settings: S3Settings) -> S3Client:
+    """Build a boto3 S3 client (SigV4) from settings."""
     import boto3
     from botocore.config import Config
 
-    style = addressing_style or ("path" if settings.force_path_style else "auto")
     config = Config(
-        signature_version=signature_version,
-        s3={"addressing_style": style},
-        retries={"max_attempts": max_attempts, "mode": "standard"},
+        signature_version="s3v4",
+        s3={"addressing_style": "path" if settings.force_path_style else "auto"},
+        retries={"max_attempts": 5, "mode": "standard"},
         connect_timeout=5,
         read_timeout=60,
         # MinIO accepts the newer default checksum behaviour, but being explicit

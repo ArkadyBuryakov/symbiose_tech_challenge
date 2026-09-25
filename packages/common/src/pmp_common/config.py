@@ -93,10 +93,6 @@ class KafkaSettings(BaseSettings):
     security_protocol: str = "PLAINTEXT"
     sasl_mechanism: SaslMechanism = "none"
     aws_region: str = "eu-west-1"
-    client_id: str = "pmp"
-    topic_publication_requested: str = "publication.requested"
-    topic_publication_results: str = "publication.results"
-    topic_publication_dlq: str = "publication.requested.dlq"
     consumer_group: str = "publication-worker"
     # Delivery/consumer tuning; exposed so it can be adjusted per environment.
     request_timeout_ms: int = 30_000
@@ -118,7 +114,6 @@ class S3Settings(BaseSettings):
     staging_bucket: str = "staging"
     publish_bucket: str = "publish"
     presign_expiry_seconds: int = 900
-    multipart_threshold_bytes: int = 5 * 1024**3
     multipart_part_bytes: int = 512 * 1024**2
 
     @model_validator(mode="after")
@@ -139,13 +134,8 @@ class ObservabilitySettings(BaseSettings):
 
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
     log_format: Literal["json", "console"] = Field(default="json", validation_alias="LOG_FORMAT")
+    # Sampling is configured by the OTel SDK itself from OTEL_TRACES_SAMPLER(_ARG).
     otlp_endpoint: str | None = Field(default=None, validation_alias="OTEL_EXPORTER_OTLP_ENDPOINT")
-    trace_sample_ratio: float = Field(default=1.0, validation_alias="OTEL_TRACES_SAMPLER_ARG")
-
-    @field_validator("log_level")
-    @classmethod
-    def _upper(cls, value: str) -> str:
-        return value.upper()
 
 
 class ServiceSettings(BaseSettings):

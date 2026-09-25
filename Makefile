@@ -27,12 +27,10 @@ endif
 export GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 
 # Long-running services `up --wait` waits on. The one-shot init containers are
-# excluded (compose treats any exited container as a failure) and are checked
-# separately by scripts/check-oneshots.sh.
+# excluded (compose treats any exited container as a failure); a failing one
+# already fails the first `up`, because its dependants require
+# `service_completed_successfully`.
 WAIT_SERVICES := postgres kafka s3 kafka-console auth gateway backend worker edge-verifier edge
-ONESHOTS := migrate migrate-auth kafka-init s3-init
-export ONESHOTS
-export COMPOSE_CMD := $(COMPOSE)
 
 .PHONY: help
 help: ## Show this help
@@ -57,8 +55,6 @@ bootstrap: .env dev-keys/internal-jwt.key ## Create .env and dev keys (no contai
 up: bootstrap ## Build and start the stack, waiting until it is healthy
 	$(COMPOSE) up -d --build
 	$(COMPOSE) up -d --no-build --wait --wait-timeout 300 $(WAIT_SERVICES) $(OBSERVABILITY_SERVICES)
-	@echo "--- one-shot jobs ---"
-	@./scripts/check-oneshots.sh
 	@$(MAKE) --no-print-directory status
 
 .PHONY: down
@@ -108,13 +104,10 @@ add-user: ## Create a user: make add-user email=a@b.c password=... tenant=tenant
 list-users: ## List users with their tenants and roles
 	@$(AUTH_CLI) list
 
-.PHONY: seed-rotate
-seed-rotate: ## Re-seed and mint a fresh producer API key
-	$(MAKE) seed rotate=1
-
 .PHONY: seed
 seed: ## Create the demo tenants, users and producer API key
-	$(COMPOSE) run --rm --no-deps -T -e ROTATE_API_KEY=$(rotate) auth node dist/seed.js
+	$(COMPOSE) run --rm --no-deps -T -v "$(CURDIR)/dev-keys:/run/dev-keys" \
+		-e PRODUCER_API_KEY_PATH=/run/dev-keys/producer-api-key auth node dist/seed.js
 
 .PHONY: demo
 demo: ## Publish a sample archive end to end and print the map URL
@@ -126,11 +119,11 @@ synthetic: ## Generate a synthetic PMTiles archive (needs no sample data)
 
 .PHONY: chaos-duplicate
 chaos-duplicate: ## Replay a publication message; assert one version is created
-	./scripts/chaos-duplicate.sh $(f)
+	uv run pytest tests/e2e/test_chaos.py -k duplicate -v
 
 .PHONY: chaos-crash-after-copy
 chaos-crash-after-copy: ## Kill the worker between copy and commit; assert clean recovery
-	./scripts/chaos-crash-after-copy.sh $(f)
+	uv run pytest tests/e2e/test_chaos.py -k crash -v
 
 .PHONY: dlq
 dlq: ## Print the dead-letter topic

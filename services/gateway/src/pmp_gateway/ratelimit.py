@@ -14,6 +14,7 @@ not change when that happens.
 
 from __future__ import annotations
 
+import math
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -38,14 +39,14 @@ class _Bucket:
 class RateLimiter:
     """Token bucket: ``rate`` tokens per second, up to ``burst`` in reserve."""
 
-    def __init__(self, *, rate_per_second: float, burst: int, max_buckets: int) -> None:
+    def __init__(self, *, rate_per_second: float, burst: int, max_buckets: int = 50_000) -> None:
         self._rate = rate_per_second
         self._burst = float(burst)
         self._max_buckets = max_buckets
         self._buckets: OrderedDict[str, _Bucket] = OrderedDict()
 
-    def allow(self, key: str, *, cost: float = 1.0, now: float | None = None) -> bool:
-        """Consume ``cost`` tokens for ``key``; False when the bucket is empty."""
+    def allow(self, key: str, *, now: float | None = None) -> bool:
+        """Consume one token for ``key``; False when the bucket is empty."""
         now = time.monotonic() if now is None else now
         bucket = self._buckets.get(key)
 
@@ -63,18 +64,17 @@ class RateLimiter:
             bucket.updated_at = now
             self._buckets.move_to_end(key)
 
-        if bucket.tokens < cost:
+        if bucket.tokens < 1:
             return False
-        bucket.tokens -= cost
+        bucket.tokens -= 1
         return True
 
-    def retry_after(self, key: str, *, cost: float = 1.0) -> int:
-        """Whole seconds until ``cost`` tokens are available, for `Retry-After`."""
+    def retry_after(self, key: str) -> int:
+        """Whole seconds until a token is available, for `Retry-After`."""
         bucket = self._buckets.get(key)
         if bucket is None or self._rate <= 0:
             return 1
-        deficit = max(cost - bucket.tokens, 0.0)
-        return max(1, int(deficit / self._rate + 0.999))
+        return max(1, math.ceil((1 - bucket.tokens) / self._rate))
 
     def __len__(self) -> int:
         return len(self._buckets)

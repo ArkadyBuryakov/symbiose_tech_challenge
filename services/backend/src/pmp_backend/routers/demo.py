@@ -11,13 +11,12 @@ nothing outside the processing environment writes to staging.
 from __future__ import annotations
 
 import base64
-import binascii
 
 from fastapi import APIRouter, status
 
 from pmp_common.ids import new_uuid
 from pmp_common.logging import get_logger
-from pmp_common.problem import BadRequest, NotFound
+from pmp_common.problem import NotFound
 from pmp_common.s3 import staging_key
 
 from ..deps import Settings, Store
@@ -26,14 +25,6 @@ from ..schemas import DemoUploadRequest, DemoUploadResponse
 
 router = APIRouter(prefix="/demo", tags=["demo"])
 log = get_logger(__name__)
-
-
-def _hex_to_b64(sha256_hex: str) -> str:
-    """S3 checksum headers carry base64, the rest of the platform uses hex."""
-    try:
-        return base64.b64encode(bytes.fromhex(sha256_hex)).decode()
-    except (ValueError, binascii.Error) as exc:
-        raise BadRequest("sha256 must be 64 hexadecimal characters.") from exc
 
 
 @router.post(
@@ -52,13 +43,13 @@ async def create_upload(
         # 404 rather than 403: a disabled feature should not be discoverable.
         raise NotFound("Demo uploads are not enabled on this deployment.")
 
-    tenant_id = identity.require_tenant()
     upload_id = new_uuid()
-    key = staging_key(tenant_id, upload_id)
+    key = staging_key(identity.require_tenant(), upload_id)
 
     url, headers = storage.presign_staging_put(
         key=key,
-        sha256_b64=_hex_to_b64(body.sha256) if body.sha256 else None,
+        # S3 checksum headers carry base64; the schema already enforced 64 hex chars.
+        sha256_b64=base64.b64encode(bytes.fromhex(body.sha256)).decode(),
         content_length=body.content_length,
     )
     # The URL carries a signature; only the key is safe to log.

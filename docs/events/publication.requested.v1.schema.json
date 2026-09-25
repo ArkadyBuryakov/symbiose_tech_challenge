@@ -14,21 +14,10 @@
   "additionalProperties": false,
   "description": "A client asked for a staged object to be published.\n\nEmitted by the backend through the transactional outbox path (and re-emitted\nby the worker's reconciler), consumed by the worker.",
   "properties": {
-    "attempt": {
-      "default": 1,
-      "description": "1 on first emit; >1 when re-emitted.",
-      "minimum": 1,
-      "title": "Attempt",
-      "type": "integer"
-    },
     "dataset_id": {
       "description": "Dataset the event is about; also the partition key.",
       "format": "uuid",
       "title": "Dataset Id",
-      "type": "string"
-    },
-    "dataset_slug": {
-      "title": "Dataset Slug",
       "type": "string"
     },
     "event_id": {
@@ -43,10 +32,6 @@
       "title": "Event Type",
       "type": "string"
     },
-    "idempotency_key": {
-      "title": "Idempotency Key",
-      "type": "string"
-    },
     "job_id": {
       "description": "Publication job the event belongs to.",
       "format": "uuid",
@@ -56,11 +41,6 @@
     "occurred_at": {
       "format": "date-time",
       "title": "Occurred At",
-      "type": "string"
-    },
-    "requested_by": {
-      "description": "User id that requested the publication.",
-      "title": "Requested By",
       "type": "string"
     },
     "schema_version": {
@@ -87,11 +67,8 @@
     "tenant_id",
     "dataset_id",
     "job_id",
-    "dataset_slug",
     "source_key",
-    "visibility",
-    "requested_by",
-    "idempotency_key"
+    "visibility"
   ],
   "title": "PublicationRequested",
   "type": "object"

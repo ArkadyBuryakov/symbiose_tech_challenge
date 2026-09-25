@@ -66,7 +66,7 @@ changes are needed for any of them.
 | `CLOUDFRONT_KEY_PAIR_ID` | `LOCALKEYPAIRID` | the CloudFront **public key ID** in the trusted key group |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://jaeger:4317` (profile) | the ADOT collector service |
 | `DEMO_UPLOAD_ENABLED` | `true` | **`false`** |
-| `ENVIRONMENT` | `local` | `prod` (also makes `BACKEND_AUTH_MODE=dev_stub` refuse to start) |
+| `ENVIRONMENT` | `local` | `prod` |
 
 The two AWS-only code paths are deliberately small, isolated and marked as
 stubs, because they cannot be exercised locally:
@@ -94,7 +94,6 @@ Postgres grants (`ops/db/grants.sql`) one for one.
 ### backend
 * `s3:PutObject` on `arn:aws:s3:::<staging>/*` — this is what makes its
   presigned PUTs valid; it never writes the publish bucket.
-* `s3:GetObject` on `arn:aws:s3:::<staging>/*` (inspecting a staged object)
 * `kafka-cluster:Connect`, `kafka-cluster:DescribeTopic`,
   `kafka-cluster:WriteData` on `publication.requested`
 * `rds-db:connect` as `backend_svc`

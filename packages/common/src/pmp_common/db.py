@@ -18,7 +18,6 @@ from typing import Any
 
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
-from sqlalchemy.pool import AsyncAdaptedQueuePool, QueuePool
 
 from .config import DbSettings
 
@@ -72,23 +71,31 @@ def _make_iam_token_provider(settings: DbSettings) -> PasswordProvider:
     return provider
 
 
-def _connect_args(settings: DbSettings, application_name: str) -> dict[str, Any]:
-    options = " ".join(
-        [
-            f"-c statement_timeout={settings.statement_timeout_ms}",
-            f"-c search_path={CATALOG_SCHEMA},public",
-        ]
+def _engine_kwargs(
+    settings: DbSettings, application_name: str, pool_size: int | None
+) -> dict[str, Any]:
+    options = (
+        f"-c statement_timeout={settings.statement_timeout_ms} "
+        f"-c search_path={CATALOG_SCHEMA},public"
     )
     return {
-        "connect_timeout": settings.connect_timeout,
-        "sslmode": settings.sslmode,
-        "application_name": application_name,
-        "options": options,
+        "url": settings.url(driver="psycopg", password=None),
+        "pool_size": pool_size if pool_size is not None else settings.pool_size,
+        "max_overflow": settings.pool_max_overflow,
+        "pool_pre_ping": True,
+        "pool_recycle": settings.pool_recycle_seconds,
+        "connect_args": {
+            "connect_timeout": settings.connect_timeout,
+            "sslmode": settings.sslmode,
+            "application_name": application_name,
+            "options": options,
+        },
     }
 
 
-def _install_password_provider(engine: Engine | AsyncEngine, provider: PasswordProvider) -> None:
+def _install_password_provider(engine: Engine | AsyncEngine, settings: DbSettings) -> None:
     """Inject a freshly resolved password into every new DBAPI connection."""
+    provider = make_password_provider(settings)
     target = engine.sync_engine if isinstance(engine, AsyncEngine) else engine
 
     @event.listens_for(target, "do_connect")
@@ -99,43 +106,18 @@ def _install_password_provider(engine: Engine | AsyncEngine, provider: PasswordP
 
 
 def make_sync_engine(
-    settings: DbSettings,
-    *,
-    application_name: str,
-    pool_size: int | None = None,
+    settings: DbSettings, *, application_name: str, pool_size: int | None = None
 ) -> Engine:
     """Engine for the worker and for Alembic."""
-    provider = make_password_provider(settings)
-    engine = create_engine(
-        settings.url(driver="psycopg", password=None),
-        poolclass=QueuePool,
-        pool_size=pool_size if pool_size is not None else settings.pool_size,
-        max_overflow=settings.pool_max_overflow,
-        pool_pre_ping=True,
-        pool_recycle=settings.pool_recycle_seconds,
-        connect_args=_connect_args(settings, application_name),
-        future=True,
-    )
-    _install_password_provider(engine, provider)
+    engine = create_engine(**_engine_kwargs(settings, application_name, pool_size))
+    _install_password_provider(engine, settings)
     return engine
 
 
 def make_async_engine(
-    settings: DbSettings,
-    *,
-    application_name: str,
-    pool_size: int | None = None,
+    settings: DbSettings, *, application_name: str, pool_size: int | None = None
 ) -> AsyncEngine:
     """Engine for the async FastAPI backend."""
-    provider = make_password_provider(settings)
-    engine = create_async_engine(
-        settings.url(driver="psycopg", password=None),
-        poolclass=AsyncAdaptedQueuePool,
-        pool_size=pool_size if pool_size is not None else settings.pool_size,
-        max_overflow=settings.pool_max_overflow,
-        pool_pre_ping=True,
-        pool_recycle=settings.pool_recycle_seconds,
-        connect_args=_connect_args(settings, application_name),
-    )
-    _install_password_provider(engine, provider)
+    engine = create_async_engine(**_engine_kwargs(settings, application_name, pool_size))
+    _install_password_provider(engine, settings)
     return engine

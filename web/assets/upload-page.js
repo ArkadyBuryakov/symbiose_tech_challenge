@@ -11,7 +11,14 @@
  * 4. Call POST /publications, then poll the job to a terminal state.
  */
 
-import { ApiError, api, formatBytes, newIdempotencyKey, waitForJob } from "./api.js";
+import {
+    ApiError,
+    api,
+    formatBytes,
+    newIdempotencyKey,
+    notify as showNotice,
+    waitForJob,
+} from "./api.js";
 
 const form = document.getElementById("upload-form");
 const submit = document.getElementById("submit");
@@ -20,14 +27,7 @@ const progressCard = document.getElementById("progress-card");
 const stepsEl = document.getElementById("steps");
 const resultEl = document.getElementById("result");
 
-function notify(message, kind = "info") {
-    alertEl.innerHTML = "";
-    if (!message) return;
-    const div = document.createElement("div");
-    div.className = kind === "error" ? "notice error" : "notice";
-    div.textContent = message;
-    alertEl.appendChild(div);
-}
+const notify = (message, kind) => showNotice(alertEl, message, kind);
 
 function step(text) {
     const li = document.createElement("li");

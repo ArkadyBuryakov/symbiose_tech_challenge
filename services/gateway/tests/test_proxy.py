@@ -51,7 +51,12 @@ def upstream_client(handler) -> httpx.AsyncClient:  # type: ignore[no-untyped-de
     return httpx.AsyncClient(transport=httpx.MockTransport(capture))
 
 
-def make_app(client: httpx.AsyncClient, *, internal_token: str | None = "tok") -> FastAPI:
+def make_app(
+    client: httpx.AsyncClient,
+    *,
+    internal_token: str | None = "tok",
+    strip_authorization: bool = True,
+) -> FastAPI:
     app = FastAPI()
 
     @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
@@ -61,6 +66,7 @@ def make_app(client: httpx.AsyncClient, *, internal_token: str | None = "tok") -
             client=client,
             target_url=f"http://upstream/{path}",
             internal_token=internal_token,
+            strip_authorization=strip_authorization,
             request_id="req-1",
         )
 
@@ -145,11 +151,22 @@ async def test_public_routes_forward_the_caller_s_authorization_untouched() -> N
     """With no internal token (a `public` pass-through route) the caller's own
     header belongs to the upstream."""
     await call(
-        make_app(upstream_client(ok), internal_token=None),
+        make_app(upstream_client(ok), internal_token=None, strip_authorization=False),
         headers={"authorization": "Basic abc"},
     )
 
     assert RECORDED["request"].headers["authorization"] == "Basic abc"
+
+
+async def test_an_anonymous_caller_s_authorization_is_stripped_too() -> None:
+    """On an `optional` route an anonymous caller gets no internal token, but
+    its own bearer token must still never reach the backend."""
+    await call(
+        make_app(upstream_client(ok), internal_token=None),
+        headers={"authorization": "Bearer replayed-or-forged"},
+    )
+
+    assert "authorization" not in RECORDED["request"].headers
 
 
 async def test_hop_by_hop_request_headers_are_not_forwarded() -> None:
@@ -243,20 +260,3 @@ async def test_a_cookie_set_for_one_caller_is_never_sent_for_another() -> None:
     assert seen[1] is None, "an anonymous request carried a cookie it never sent"
     assert seen[2] == "better-auth.session_token=BOB"
     assert len(client.cookies.jar) == 0
-
-
-async def test_a_default_httpx_client_would_leak_which_is_why_the_factory_exists() -> None:
-    """Documents the failure mode the factory prevents."""
-
-    seen: list[str | None] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.headers.get("cookie"))
-        return reply(200, headers=[("set-cookie", "session=ALICE; Path=/")])
-
-    leaky = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    app = make_app(leaky, internal_token=None)
-    await call(app)
-    await call(app)
-
-    assert seen[1] == "session=ALICE"

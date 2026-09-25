@@ -5,6 +5,9 @@ no exporter is installed and the SDK stays effectively inert. That keeps the
 default local stack light while ``make up PROFILE=observability`` lights up a
 full trace: edge -> gateway -> backend -> Kafka -> worker -> DB/S3.
 
+Sampling is left to the SDK's own environment variables
+(``OTEL_TRACES_SAMPLER`` / ``OTEL_TRACES_SAMPLER_ARG``; default: always on).
+
 Kafka has no automatic instrumentation here, so the W3C ``traceparent`` is
 injected into and extracted from message headers explicitly.
 """
@@ -16,28 +19,29 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any
 
-from opentelemetry import context as otel_context
 from opentelemetry import trace
 from opentelemetry.propagate import extract, inject
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.sdk.trace.sampling import ALWAYS_ON, ParentBased, TraceIdRatioBased
 from opentelemetry.trace import SpanKind
 
 from .logging import get_logger
 
 __all__ = [
     "SpanKind",
-    "carrier_from_kafka_headers",
     "configure_tracing",
     "current_trace_id",
-    "get_tracer",
+    "header_value",
     "instrument_fastapi",
+    "instrument_psycopg",
     "kafka_headers_from_carrier",
+    "merge_headers",
     "span_from_kafka_headers",
     "traced",
 ]
+
+KafkaHeaders = Sequence[tuple[str, bytes | None]] | None
 
 _KAFKA_CONTEXT_KEYS = ("traceparent", "tracestate")
 _log = get_logger(__name__)
@@ -48,7 +52,6 @@ def configure_tracing(
     service: str,
     version: str = "unknown",
     endpoint: str | None = None,
-    sample_ratio: float = 1.0,
     environment: str = "local",
 ) -> None:
     """Install a tracer provider. A no-op exporter-wise when ``endpoint`` is None."""
@@ -59,8 +62,7 @@ def configure_tracing(
             "deployment.environment.name": environment,
         }
     )
-    sampler = ALWAYS_ON if sample_ratio >= 1.0 else ParentBased(TraceIdRatioBased(sample_ratio))
-    provider = TracerProvider(resource=resource, sampler=sampler)
+    provider = TracerProvider(resource=resource)
 
     if endpoint:
         from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
@@ -83,12 +85,12 @@ def configure_tracing(
             _log.warning("tracing.instrument_httpx_failed", error=str(exc))
 
 
-def instrument_fastapi(app: Any, *, excluded_urls: str = "healthz,readyz,metrics") -> None:
+def instrument_fastapi(app: Any) -> None:
     """Attach FastAPI server instrumentation, skipping probe endpoints."""
     try:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-        FastAPIInstrumentor.instrument_app(app, excluded_urls=excluded_urls)
+        FastAPIInstrumentor.instrument_app(app, excluded_urls="healthz,readyz,metrics")
     except Exception as exc:  # pragma: no cover
         _log.warning("tracing.instrument_fastapi_failed", error=str(exc))
 
@@ -103,20 +105,23 @@ def instrument_psycopg() -> None:
         _log.warning("tracing.instrument_psycopg_failed", error=str(exc))
 
 
-def get_tracer(name: str) -> trace.Tracer:
-    return trace.get_tracer(name)
-
-
 def current_trace_id() -> str | None:
     ctx = trace.get_current_span().get_span_context()
     return format(ctx.trace_id, "032x") if ctx.is_valid else None
 
 
 @contextmanager
-def traced(name: str, /, *, kind: SpanKind = SpanKind.INTERNAL, **attrs: Any) -> Iterator[Any]:
-    """Convenience span context manager that records exceptions."""
+def traced(
+    name: str,
+    /,
+    *,
+    kind: SpanKind = SpanKind.INTERNAL,
+    context: Any = None,
+    **attrs: Any,
+) -> Iterator[Any]:
+    """Span context manager; ``None`` attribute values are skipped."""
     tracer = trace.get_tracer("pmp")
-    with tracer.start_as_current_span(name, kind=kind) as span:
+    with tracer.start_as_current_span(name, context=context, kind=kind) as span:
         for key, value in attrs.items():
             if value is not None:
                 span.set_attribute(key, value)
@@ -133,60 +138,26 @@ def kafka_headers_from_carrier() -> list[tuple[str, bytes]]:
     return [(k, v.encode()) for k, v in carrier.items()]
 
 
-def carrier_from_kafka_headers(
-    headers: Sequence[tuple[str, bytes | None]] | None,
-) -> dict[str, str]:
-    """Extract the W3C trace headers from Kafka headers into a text-map carrier."""
-    carrier: dict[str, str] = {}
-    for key, value in headers or ():
-        if key.lower() in _KAFKA_CONTEXT_KEYS and value is not None:
-            carrier[key.lower()] = value.decode()
-    return carrier
-
-
-@contextmanager
-def span_from_kafka_headers(
-    name: str,
-    headers: Sequence[tuple[str, bytes | None]] | None,
-    **attrs: Any,
-) -> Iterator[Any]:
-    """Continue the producer's trace when consuming a Kafka message."""
-    parent = extract(carrier_from_kafka_headers(headers))
-    token = otel_context.attach(parent)
-    tracer = trace.get_tracer("pmp")
-    try:
-        with tracer.start_as_current_span(name, kind=SpanKind.CONSUMER) as span:
-            for key, value in attrs.items():
-                if value is not None:
-                    span.set_attribute(key, value)
-            yield span
-    finally:
-        otel_context.detach(token)
-
-
-def header_value(
-    headers: Sequence[tuple[str, bytes | None]] | Mapping[str, Any] | None,
-    key: str,
-) -> str | None:
-    """Read a single Kafka header value as text."""
-    if headers is None:
-        return None
-    items = headers.items() if isinstance(headers, Mapping) else headers
-    for name, value in items:
-        if name.lower() == key.lower() and value is not None:
-            return value.decode() if isinstance(value, bytes | bytearray) else str(value)
-    return None
-
-
 def merge_headers(extra: Mapping[str, str | None] | None = None) -> list[tuple[str, bytes]]:
     """Kafka headers carrying the current trace context plus correlation extras.
 
     Header names contain hyphens (``x-request-id``), so extras are passed as a
     mapping rather than keyword arguments.
     """
-    out: dict[str, bytes] = dict(kafka_headers_from_carrier())
+    out = dict(kafka_headers_from_carrier())
     out.update({k: v.encode() for k, v in (extra or {}).items() if v is not None})
     return list(out.items())
 
 
-__all__ += ["header_value", "instrument_psycopg", "merge_headers"]
+def header_value(headers: KafkaHeaders, key: str) -> str | None:
+    """Read a single Kafka header value as text."""
+    for name, value in headers or ():
+        if name.lower() == key.lower() and value is not None:
+            return value.decode()
+    return None
+
+
+def span_from_kafka_headers(name: str, headers: KafkaHeaders, **attrs: Any) -> Any:
+    """Continue the producer's trace when consuming a Kafka message."""
+    carrier = {k: v for k in _KAFKA_CONTEXT_KEYS if (v := header_value(headers, k)) is not None}
+    return traced(name, kind=SpanKind.CONSUMER, context=extract(carrier), **attrs)

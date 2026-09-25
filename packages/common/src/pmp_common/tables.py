@@ -105,5 +105,4 @@ outbox = Table(
     Column("headers", JSONB, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("sent_at", DateTime(timezone=True), nullable=True),
-    Column("attempts", Integer, nullable=False, server_default="0"),
 )

@@ -18,8 +18,6 @@ def main() -> None:
         access_log=False,
         workers=1,
         timeout_graceful_shutdown=20,
-        # The gateway forwards upload bodies; it must not cap them itself.
-        h11_max_incomplete_event_size=64 * 1024,
     )
 
 

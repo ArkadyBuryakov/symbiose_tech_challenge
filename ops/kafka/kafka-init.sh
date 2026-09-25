@@ -6,10 +6,11 @@
 set -euo pipefail
 
 BROKERS="${KAFKA_BROKERS:-kafka:9092}"
-PARTITIONS="${TOPIC_PARTITIONS:-6}"
+PARTITIONS=6
 
 # Single-broker dev cluster, so RF=1. On MSK this is 3.
 REPLICAS="${TOPIC_REPLICAS:-1}"
+# Topic names are constants shared with the services (pmp_common.kafka).
 
 create_topic() {
     local name="$1" partitions="$2" retention_ms="$3"
@@ -29,10 +30,10 @@ create_topic() {
 
 # Partitioned by dataset_id so all work for one dataset is ordered and lands on
 # the same consumer, which keeps the per-dataset row lock uncontended.
-create_topic "${TOPIC_REQUESTED:-publication.requested}" "$PARTITIONS" 604800000   # 7 days
-create_topic "${TOPIC_RESULTS:-publication.results}"     "$PARTITIONS" 604800000   # 7 days
+create_topic publication.requested "$PARTITIONS" 604800000   # 7 days
+create_topic publication.results   "$PARTITIONS" 604800000   # 7 days
 # Dead letters are kept longer: they exist to be inspected and replayed by hand.
-create_topic "${TOPIC_DLQ:-publication.requested.dlq}"   "$PARTITIONS" 2592000000  # 30 days
+create_topic publication.requested.dlq "$PARTITIONS" 2592000000  # 30 days
 
 echo "--- topics ---"
 rpk topic list --brokers "$BROKERS"
