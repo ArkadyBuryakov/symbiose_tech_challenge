@@ -91,10 +91,15 @@ def test_6_a_crash_between_copy_and_commit_recovers_to_the_same_version(
         time.sleep(3)
 
         accepted = alice.publish(slug, alice.stage(archive_v1))
-        time.sleep(8)  # the crashing worker claims, copies, and exits
-
-        job = alice.get(f"/api/v1/publications/{accepted['job_id']}").json()
-        assert job["status"] in ("RUNNING", "PENDING"), job
+        # Wait for the crashing worker to claim, copy and exit. A fixed sleep
+        # flakes: joining the consumer group can take longer than the job.
+        deadline = time.monotonic() + 60
+        while True:
+            job = alice.get(f"/api/v1/publications/{accepted['job_id']}").json()
+            if job["status"] == "RUNNING" or time.monotonic() > deadline:
+                break
+            time.sleep(1)
+        assert job["status"] == "RUNNING", job
 
         restart_worker(WORKER_LEASE_SECONDS="15", WORKER_RECONCILER_INTERVAL_SECONDS="10")
         job = alice.wait(accepted["job_id"], timeout=120)

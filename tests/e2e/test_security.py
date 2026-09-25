@@ -58,7 +58,7 @@ def test_8b_private_datasets_are_invisible_to_other_tenants(
     assert bob.get(f"{API}/datasets/{dataset_id}").status_code == 404
     assert anon.get(f"{API}/datasets/{dataset_id}/current").status_code == 404
 
-    listed = {d["id"] for d in bob.get(f"{API}/datasets", params={"limit": 500}).json()["items"]}
+    listed = {d["id"] for d in bob.get(f"{API}/datasets", params={"limit": 100}).json()["items"]}
     assert dataset_id not in listed
 
 
@@ -67,7 +67,7 @@ def test_8c_platform_admin_sees_every_tenant(
 ) -> None:
     job = alice.publish_and_wait(slug, archive_v1, visibility="private")
 
-    listed = admin.get(f"{API}/admin/datasets", params={"limit": 500})
+    listed = admin.get(f"{API}/admin/datasets", params={"limit": 100})
     assert listed.status_code == 200
     assert job["dataset_id"] in {d["id"] for d in listed.json()["items"]}
 

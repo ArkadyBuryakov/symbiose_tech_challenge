@@ -106,7 +106,10 @@ list-users: ## List users with their tenants and roles
 
 .PHONY: seed
 seed: ## Create the demo tenants, users and producer API key
-	$(COMPOSE) run --rm --no-deps -T -v "$(CURDIR)/dev-keys:/run/dev-keys" \
+	@# Root inside this one-off container: with rootless Docker that is the host
+	@# user, the only uid that can write dev-keys/. The file is 0644 like the
+	@# other dev keys, so it stays readable under rootful Docker too.
+	$(COMPOSE) run --rm --no-deps -T --user 0:0 -v "$(CURDIR)/dev-keys:/run/dev-keys" \
 		-e PRODUCER_API_KEY_PATH=/run/dev-keys/producer-api-key auth node dist/seed.js
 
 .PHONY: demo

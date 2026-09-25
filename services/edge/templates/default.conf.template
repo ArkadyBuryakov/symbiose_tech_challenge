@@ -87,6 +87,9 @@ server {
     # signed cookie for this tenant. On AWS this check is CloudFront's; here it
     # is delegated to the edge-verifier via auth_request.
     location ~ ^/tiles/private/(?<tenant_id>[^/]+)/(?<object_path>.+)$ {
+        # Captured here because inside the auth subrequest $uri is
+        # "/_verify_tile"; subrequests share this request's variables.
+        set $tile_uri $uri;
         auth_request /_verify_tile;
 
         set $s3_upstream ${S3_UPSTREAM};
@@ -109,10 +112,10 @@ server {
         proxy_set_header Content-Length "";
         # The verifier needs the path (it is what the policy is scoped to) and
         # the cookies (they carry the signed policy). It must be the
-        # *normalised* $uri that nginx routed on, not the raw $request_uri:
+        # *normalised* path nginx routed on, not the raw $request_uri:
         # otherwise `/tiles/private/<mine>/..%2F<theirs>/...` is authorised
         # against <mine> and served from <theirs>.
-        proxy_set_header X-Original-URI $uri$is_args$args;
+        proxy_set_header X-Original-URI $tile_uri$is_args$args;
         proxy_set_header X-Request-Id $request_id_final;
         proxy_connect_timeout 2s;
         proxy_read_timeout 5s;

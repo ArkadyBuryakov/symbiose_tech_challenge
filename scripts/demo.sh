@@ -133,8 +133,9 @@ CURRENT="$(api "${API}/datasets/${DATASET_ID}/current")"
 TILE_URL="$(echo "$CURRENT" | json "['url']")"
 
 # A private archive needs the signed tile cookies first — exactly what the map
-# page does before its first range request.
-if [[ "$VISIBILITY" == "private" ]]; then
+# page does before its first range request. The dataset's own visibility, not
+# the requested one: an existing dataset keeps the visibility it was created with.
+if [[ "$(echo "$CURRENT" | json "['visibility']")" == "private" ]]; then
     api -o /dev/null -X POST "${API}/tiles/session"
     echo "  obtained signed tile cookies for the private archive"
 fi

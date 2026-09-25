@@ -117,7 +117,7 @@ async function main(): Promise<void> {
       },
     });
     apiKeyValue = created.key;
-    if (keyPath) writeFileSync(keyPath, `${apiKeyValue}\n`, { mode: 0o600 });
+    if (keyPath) writeFileSync(keyPath, `${apiKeyValue}\n`, { mode: 0o644 });
     logger.info({ event: "seed.api_key_minted", name: API_KEY_NAME, file: keyPath ?? null });
   }
 
