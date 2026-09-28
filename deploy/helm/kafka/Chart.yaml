@@ -1,0 +1,5 @@
+apiVersion: v2
+name: pmp-kafka
+description: Single Redpanda broker standing in for MSK in the demo deployment. Installed by deploy/terraform before the pmp chart, so the topics exist before any service starts.
+type: application
+version: 0.1.0

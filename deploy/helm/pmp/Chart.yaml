@@ -1,0 +1,5 @@
+apiVersion: v2
+name: pmp
+description: PMTiles publishing platform on EKS. Installed by deploy/terraform, which supplies every value.
+type: application
+version: 0.1.0

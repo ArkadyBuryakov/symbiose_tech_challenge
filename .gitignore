@@ -36,3 +36,8 @@ services/auth/dist/
 
 # --- local runtime artifacts ---
 .local/
+
+# --- terraform (state holds the generated keys: never commit it) ---
+.terraform/
+*.tfstate
+*.tfstate.*

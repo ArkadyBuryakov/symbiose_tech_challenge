@@ -56,6 +56,10 @@ class Storage:
             HttpMethod="PUT",
         )
         headers = {"content-type": PMTILES_CONTENT_TYPE, "x-amz-checksum-sha256": sha256_b64}
+        # On AWS the regional endpoint is public, so the browser PUTs straight
+        # to it (CORS on the staging bucket) and there is nothing to rewrite.
+        if not self._settings.endpoint:
+            return signed, headers
         return self._rewrite_to_edge(signed), headers
 
     def _rewrite_to_edge(self, url: str) -> str:

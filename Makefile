@@ -59,11 +59,11 @@ up: bootstrap ## Build and start the stack, waiting until it is healthy
 
 .PHONY: down
 down: ## Stop the stack, keeping data volumes
-	$(COMPOSE) down --remove-orphans
+	docker compose $(COMPOSE_FILES) --profile "*" down --remove-orphans
 
 .PHONY: clean
 clean: ## Stop the stack, delete volumes and dev keys
-	$(COMPOSE) down --remove-orphans --volumes
+	docker compose $(COMPOSE_FILES) --profile "*" down --remove-orphans --volumes
 	rm -rf dev-keys
 	@echo "removed volumes and dev keys"
 
@@ -132,6 +132,19 @@ chaos-crash-after-copy: ## Kill the worker between copy and commit; assert clean
 dlq: ## Print the dead-letter topic
 	$(COMPOSE) exec -T kafka rpk topic consume publication.requested.dlq -o :end -f \
 		'--- %k\n%v\n' || true
+
+# ---------------------------------------------------------------- aws
+TF := terraform -chdir=deploy/terraform
+
+.PHONY: aws-up
+aws-up: ## Build, push and deploy everything to AWS (deploy/README.md)
+	$(TF) init -input=false
+	$(TF) apply
+
+.PHONY: aws-down
+aws-down: ## Destroy everything `aws-up` created
+	$(TF) init -input=false
+	$(TF) destroy
 
 # ---------------------------------------------------------------- quality
 .PHONY: lint

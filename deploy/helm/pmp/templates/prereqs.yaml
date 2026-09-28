@@ -1,0 +1,50 @@
+{{- $secrets := .Values.secrets }}
+{{- $keys := dict
+  "gateway-keys" (list (list $secrets.internalJwtPrivateKey "internal-jwt.key"))
+  "auth-keys" (list (list $secrets.betterAuthSecret "better-auth.secret"))
+  "backend-keys" (list (list $secrets.internalJwtPublicKey "internal-jwt.pub") (list $secrets.cloudfrontPrivateKey "cloudfront.key"))
+}}
+{{- range $name, $objects := $keys }}
+---
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: {{ $name }}
+  {{- include "pmp.preHook" $ | nindent 2 }}
+spec:
+  provider: aws
+  parameters:
+    usePodIdentity: "true"
+    objects: |
+      {{- range $objects }}
+      - objectName: {{ index . 0 | quote }}
+        objectType: secretsmanager
+        objectAlias: {{ index . 1 | quote }}
+      {{- end }}
+{{- end }}
+---
+# The migration Job logs in as the RDS master user; RDS keeps its password.
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: migrate-keys
+  {{- include "pmp.preHook" . | nindent 2 }}
+spec:
+  provider: aws
+  parameters:
+    usePodIdentity: "true"
+    objects: |
+      - objectName: {{ .Values.db.masterSecretArn | quote }}
+        objectType: secretsmanager
+        objectAlias: db-master.json
+        jmesPath:
+          - path: password
+            objectAlias: db_master_password
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rds-ca
+  {{- include "pmp.preHook" . | nindent 2 }}
+data:
+  ca.pem: {{ .Values.rdsCaBundle | quote }}

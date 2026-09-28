@@ -102,10 +102,10 @@ def _request(headers: dict[str, str], peer: str = "10.0.0.5") -> object:
     return StarletteRequest(scope)
 
 
-def test_client_ip_prefers_the_edge_s_x_real_ip() -> None:
+def test_client_ip_prefers_the_edge_s_x_client_ip() -> None:
     from pmp_gateway.app import client_ip
 
-    request = _request({"x-real-ip": "203.0.113.9", "x-forwarded-for": "1.2.3.4, 203.0.113.9"})
+    request = _request({"x-client-ip": "203.0.113.9", "x-forwarded-for": "1.2.3.4, 203.0.113.9"})
 
     assert client_ip(request) == "203.0.113.9"  # type: ignore[arg-type]
 
@@ -115,8 +115,8 @@ def test_a_forged_x_forwarded_for_does_not_change_the_bucket() -> None:
     the rate-limit bucket, rotating it would evade the limit entirely."""
     from pmp_gateway.app import _bucket_key
 
-    a = _request({"x-real-ip": "203.0.113.9", "x-forwarded-for": "1.1.1.1, 203.0.113.9"})
-    b = _request({"x-real-ip": "203.0.113.9", "x-forwarded-for": "2.2.2.2, 203.0.113.9"})
+    a = _request({"x-client-ip": "203.0.113.9", "x-forwarded-for": "1.1.1.1, 203.0.113.9"})
+    b = _request({"x-client-ip": "203.0.113.9", "x-forwarded-for": "2.2.2.2, 203.0.113.9"})
 
     assert _bucket_key(a, None) == _bucket_key(b, None)  # type: ignore[arg-type]
 

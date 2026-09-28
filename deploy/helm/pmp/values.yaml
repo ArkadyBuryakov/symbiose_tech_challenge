@@ -1,0 +1,34 @@
+# Every value is supplied by deploy/terraform (k8s.tf); the defaults below only
+# document the shape.
+registry: ""          # <acct>.dkr.ecr.<region>.amazonaws.com/pmp
+tag: ""
+region: ""
+publicBaseUrl: ""     # https://<distribution>.cloudfront.net
+demoUploadEnabled: false
+
+db:
+  host: ""
+  name: pmtiles
+  masterUser: postgres
+  masterSecretArn: ""
+rdsCaBundle: ""       # PEM, mounted for DB_SSLMODE=verify-full
+
+
+s3:
+  stagingBucket: ""
+  publishBucket: ""
+
+# Secrets Manager secret names, mounted at /run/keys by the CSI driver.
+secrets:
+  internalJwtPrivateKey: pmp/internal-jwt-private-key
+  internalJwtPublicKey: pmp/internal-jwt-public-key
+  cloudfrontPrivateKey: pmp/cloudfront-cookie-private-key
+  betterAuthSecret: pmp/better-auth-secret
+cloudfrontKeyPairId: ""
+
+gatewayRoutes: ""     # services/gateway/routes.yaml
+gatewayNodePort: 30080
+
+worker:
+  maxReplicas: 6      # = partitions; more would sit idle
+  lagThreshold: 1     # one job per pod

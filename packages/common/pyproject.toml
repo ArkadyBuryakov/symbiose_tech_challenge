@@ -28,7 +28,7 @@ db = [
     "alembic==1.20.0",
     "opentelemetry-instrumentation-psycopg==0.65b0",
 ]
-kafka = ["confluent-kafka==2.15.1"]
+kafka = ["confluent-kafka==2.15.1", "aws-msk-iam-sasl-signer-python==1.0.2"]
 s3 = ["boto3==1.43.101"]
 
 [build-system]

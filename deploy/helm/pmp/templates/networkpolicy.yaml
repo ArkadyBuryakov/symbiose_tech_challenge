@@ -1,0 +1,17 @@
+# auth and backend accept traffic only from the gateway (kubelet probes are
+# always allowed). Enforced by the VPC CNI's network policy agent.
+{{- range list "auth" "backend" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ . }}-from-gateway
+spec:
+  podSelector:
+    matchLabels: {app: {{ . }}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: gateway}
+{{- end }}

@@ -81,3 +81,17 @@ def test_declared_checksum_is_bound_into_the_signature() -> None:
 
     assert headers["x-amz-checksum-sha256"] == "3q2+7w=="
     assert "x-amz-checksum-sha256" in url.lower()
+
+
+def test_presigned_put_goes_straight_to_s3_on_aws() -> None:
+    """With no S3_ENDPOINT the regional endpoint is public: nothing to rewrite."""
+    storage = Storage(
+        S3Settings(region="eu-west-1", access_key_id="key", secret_access_key="secret"),
+        public_base_url="https://maps.example.com",
+    )
+
+    url, _ = storage.presign_staging_put(
+        key="org_a/u/data.pmtiles", sha256_b64="3q2+7w==", content_length=None
+    )
+
+    assert url.startswith("https://staging.s3.eu-west-1.amazonaws.com/org_a/u/data.pmtiles?")

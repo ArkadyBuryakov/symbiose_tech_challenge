@@ -7,8 +7,8 @@ existing volume is a no-op.
 Order matters:
 
 1. ``roles.sql``  - roles and schemas must exist before anything references them.
-2. role passwords - applied with a parameterised statement so they never appear
-   in a log line or a SQL file.
+2. role auth     - passwords applied with a parameterised statement so they
+   never appear in a log line or a SQL file, or, on RDS, ``rds_iam``.
 3. ``alembic upgrade head`` - creates/updates the ``catalog`` tables, running as
    the privileged bootstrap role.
 4. ``grants.sql`` - least-privilege grants, applied last because they reference
@@ -62,14 +62,18 @@ def apply_roles_and_schemas(conn: psycopg.Connection) -> None:
     log.info("migrate.roles_applied", roles=sorted(SERVICE_ROLES))
 
 
-def apply_role_passwords(conn: psycopg.Connection) -> None:
-    """Set each service role's password from the environment.
+def apply_role_auth(conn: psycopg.Connection) -> None:
+    """Let each service role log in: a password from the environment, or IAM.
 
-    Skipped entirely when ``DB_AUTH=iam``: on RDS the roles authenticate with
-    IAM tokens and have no password at all.
+    ``SERVICE_DB_AUTH=iam`` (RDS) grants ``rds_iam`` instead, so the roles
+    authenticate with IAM tokens and have no password at all. It is separate
+    from ``DB_AUTH`` because this job itself logs in as the master user, whose
+    password RDS keeps in Secrets Manager.
     """
-    if os.environ.get("DB_AUTH", "password") == "iam":
-        log.info("migrate.passwords_skipped", reason="DB_AUTH=iam")
+    if os.environ.get("SERVICE_DB_AUTH", "password") == "iam":
+        for role in SERVICE_ROLES:
+            conn.execute(sql.SQL("GRANT rds_iam TO {}").format(sql.Identifier(role)))
+        log.info("migrate.iam_granted", roles=sorted(SERVICE_ROLES))
         return
 
     for role, env_var in SERVICE_ROLES.items():
@@ -114,7 +118,7 @@ def main() -> None:
 
     with _connect(settings) as conn:
         apply_roles_and_schemas(conn)
-        apply_role_passwords(conn)
+        apply_role_auth(conn)
 
     run_alembic()
 

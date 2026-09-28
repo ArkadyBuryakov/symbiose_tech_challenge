@@ -284,16 +284,16 @@ async def _handle(request: Request, settings: GatewaySettings) -> Response:
 def client_ip(request: Request) -> str:
     """The caller's address, as established by the edge.
 
-    ``X-Real-IP`` is *overwritten* by the edge with the address of the TCP peer
+    ``X-Client-IP`` is *overwritten* by the edge with the address of the TCP peer
     it saw, and the edge is the only thing that can reach the gateway, so it is
     trustworthy here. The first ``X-Forwarded-For`` entry is not: nginx appends
     to whatever the client sent, so a client can put any address it likes at
     the front — keying a rate limit on it lets an attacker mint a fresh bucket
     per request.
     """
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip.strip()
+    client = request.headers.get("x-client-ip")
+    if client:
+        return client.strip()
     return request.client.host if request.client else "unknown"
 
 

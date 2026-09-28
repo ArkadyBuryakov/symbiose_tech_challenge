@@ -229,6 +229,8 @@ docs/                decisions, AWS mapping, runbook, event schemas
   alternatives, and why.
 * [`docs/aws-mapping.md`](docs/aws-mapping.md) — what each local component
   becomes on AWS, the config that changes, IAM per service.
+* [`docs/cost.md`](docs/cost.md) — what the AWS deployment costs, and where to
+  save.
 * [`docs/runbook.md`](docs/runbook.md) — stuck jobs, the DLQ, retries,
   rollback, worker crashes, outbox backlog, auth outages, revoking a user.
 * [`docs/events/`](docs/events/) — JSON Schema for every Kafka event.

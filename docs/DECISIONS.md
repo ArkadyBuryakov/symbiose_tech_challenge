@@ -152,7 +152,7 @@ the signed cookie is valid until its 10-minute TTL, the same as CloudFront.
 
 **Rate limits are per route class, per replica.** `routes.yaml` gives each
 class (`auth`, `read`, `default`) its own `{rps, burst}` token bucket, keyed by
-user id or `X-Real-IP`. It is an abuse control. Redis is the multi-replica next
+user id or `X-Client-IP`. It is an abuse control. Redis is the multi-replica next
 step.
 
 **`/api/auth/*` is a verbatim pass-through.** Headers stay a multi-valued list,
@@ -167,7 +167,7 @@ would let anyone create accounts on a multi-tenant platform.
 falls back to the sole membership. With several memberships and no choice, the
 token has no tenant, which is better than guessing.
 
-**Client IP comes from `X-Real-IP`.** nginx appends to a client-supplied
+**Client IP comes from `X-Client-IP`.** nginx appends to a client-supplied
 `X-Forwarded-For`, so its first entry is attacker-controlled.
 
 ## Private delivery

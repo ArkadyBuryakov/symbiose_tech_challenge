@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Create the platform's Kafka topics. Idempotent: re-running is a no-op.
 #
-# On AWS this is a Helm pre-install hook Job talking to MSK; only the
-# authentication flags change.
+# The demo AWS deployment runs this same script against its in-cluster broker
+# (deploy/helm/kafka). Against MSK only the authentication flags would change.
 set -euo pipefail
 
 BROKERS="${KAFKA_BROKERS:-kafka:9092}"

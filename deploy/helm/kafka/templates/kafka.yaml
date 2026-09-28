@@ -1,0 +1,117 @@
+# Single Redpanda broker, the same image and flags as docker-compose.yml. It
+# stands in for MSK in this demo deployment (docs/aws-mapping.md).
+#
+# Its log lives in an emptyDir: it survives container restarts but not a
+# reschedule. Nothing is lost for good either way; the worker's reconciler
+# re-publishes jobs stuck in `pending` from the catalogue. The emptyDir also
+# keeps the cluster autoscaler from draining the broker's node.
+{{- $host := printf "kafka.%s.svc.cluster.local" .Release.Namespace }}
+{{- $image := "docker.redpanda.com/redpandadata/redpanda:v25.3.2" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+spec:
+  strategy: {type: Recreate}   # never two brokers with node-id 0
+  selector:
+    matchLabels: {app: kafka}
+  template:
+    metadata:
+      labels: {app: kafka}
+    spec:
+      containers:
+        - name: redpanda
+          image: {{ $image }}
+          args:
+            - redpanda
+            - start
+            - --node-id=0
+            - --mode=dev-container
+            - --smp=1
+            - --memory=1G
+            - --default-log-level=warn
+            - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+            - --advertise-kafka-addr=PLAINTEXT://{{ $host }}:9092
+            - --rpc-addr=0.0.0.0:33145
+            - --advertise-rpc-addr={{ $host }}:33145
+          ports:
+            - {name: kafka, containerPort: 9092}
+          readinessProbe:
+            exec:
+              command: [sh, -c, "rpk cluster health --exit-when-healthy | grep -q 'Healthy:.*true'"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests: {cpu: 250m, memory: 1536Mi}
+            limits: {memory: 1536Mi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/redpanda/data}
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+spec:
+  selector: {app: kafka}
+  ports:
+    - {name: kafka, port: 9092, targetPort: kafka}
+---
+# No IAM on this broker, so this is what limits who can talk to it: the two
+# services, the topic Job and KEDA (reads consumer lag).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-clients
+spec:
+  podSelector:
+    matchLabels: {app: kafka}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [backend, worker, kafka-topics]}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: keda}
+      ports:
+        - {port: 9092}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-init
+data:
+  kafka-init.sh: {{ .Values.kafkaInit | quote }}
+---
+# ops/kafka/kafka-init.sh, as locally. A post-install hook, so it runs once the
+# broker above is ready; Terraform installs the pmp chart only after it. It is
+# idempotent, so every upgrade reruns it.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-topics
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 5
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels: {app: kafka-topics}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: kafka-topics
+          image: {{ $image }}
+          command: [bash, /scripts/kafka-init.sh]
+          env:
+            - {name: KAFKA_BROKERS, value: "{{ $host }}:9092"}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+      volumes:
+        - name: scripts
+          configMap: {name: kafka-init}

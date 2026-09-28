@@ -31,7 +31,13 @@ DO $$ BEGIN
     END IF;
 END $$;
 
+-- On RDS this runs as the master user, which is not a superuser: PostgreSQL 16
+-- lets it create a schema owned by auth_svc only if it can SET ROLE to it.
+-- The membership is dropped right after: auth_svc gets rds_iam, which the
+-- master would inherit, and RDS then refuses its password.
+GRANT auth_svc TO CURRENT_USER;
 CREATE SCHEMA IF NOT EXISTS auth AUTHORIZATION auth_svc;
+REVOKE auth_svc FROM CURRENT_USER;
 CREATE SCHEMA IF NOT EXISTS catalog;
 
 -- Nobody creates objects in `public`.

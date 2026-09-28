@@ -37,7 +37,11 @@ const schema = z.object({
   DB_PORT: z.coerce.number().int().positive().default(5432),
   DB_NAME: z.string().default("pmtiles"),
   DB_USER: z.string().default("auth_svc"),
-  DB_PASSWORD: z.string().min(1),
+  /** `iam` on RDS: short-lived IAM auth tokens instead of DB_PASSWORD. */
+  DB_AUTH: z.enum(["password", "iam"]).default("password"),
+  DB_PASSWORD: z.string().optional(),
+  /** Region for the RDS IAM token signer; only read when DB_AUTH=iam. */
+  AWS_REGION: z.string().optional(),
   DB_SSLMODE: z.string().default("disable"),
   /** BetterAuth owns every table in this schema. */
   DB_SCHEMA: z.string().default("auth"),
@@ -84,6 +88,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     throw new Error(`invalid auth service configuration:\n${issues}`);
   }
   const config = parsed.data;
+  if (config.DB_AUTH === "password" && !config.DB_PASSWORD) {
+    throw new Error(
+      "invalid auth service configuration:\n  DB_PASSWORD: required when DB_AUTH=password",
+    );
+  }
   return {
     ...config,
     betterAuthSecret: readSecret(config.BETTER_AUTH_SECRET_PATH, "BetterAuth secret"),

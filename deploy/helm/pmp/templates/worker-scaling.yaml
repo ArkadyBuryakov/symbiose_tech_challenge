@@ -1,0 +1,17 @@
+# The worker scales on consumer lag of publication.requested: one job per pod,
+# never more pods than partitions.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker
+spec:
+  scaleTargetRef: {name: worker}
+  minReplicaCount: 1
+  maxReplicaCount: {{ .Values.worker.maxReplicas }}
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: {{ include "pmp.kafkaBootstrap" . | quote }}
+        consumerGroup: publication-worker
+        topic: publication.requested
+        lagThreshold: {{ .Values.worker.lagThreshold | quote }}

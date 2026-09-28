@@ -1,0 +1,155 @@
+{{- /*
+  name, image, port, replicas, keys (SecretProviderClass or ""), env blocks.
+  The gateway is the only thing reachable from outside the cluster: a NodePort
+  that the internal ALB (Terraform) targets, with CloudFront in front.
+*/}}
+{{- $v := .Values }}
+{{- $apps := list
+  (dict "name" "gateway" "port" 8000 "keys" "gateway-keys" "db" false "kafka" false "s3" false)
+  (dict "name" "auth" "port" 3000 "keys" "auth-keys" "db" true "kafka" false "s3" false)
+  (dict "name" "backend" "port" 8000 "keys" "backend-keys" "db" true "kafka" true "s3" true)
+  (dict "name" "worker" "port" 9100 "keys" "" "db" true "kafka" true "s3" true)
+}}
+{{- range $apps }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .name }}
+  labels: {app: {{ .name }}}
+spec:
+  {{- if eq .name "auth" }}
+  replicas: 2
+  {{- end }}
+  selector:
+    matchLabels: {app: {{ .name }}}
+  template:
+    metadata:
+      labels: {app: {{ .name }}}
+    spec:
+      serviceAccountName: {{ .name }}
+      {{- if eq .name "worker" }}
+      # SIGTERM lets the in-flight job finish for WORKER_SHUTDOWN_GRACE_SECONDS
+      # (25 s); the worker must exit before the kubelet's SIGKILL.
+      terminationGracePeriodSeconds: 40
+      {{- end }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app: {{ .name }}}
+      containers:
+        - name: {{ .name }}
+          image: {{ include "pmp.image" (dict "Values" $v "name" .name) }}
+          {{- include "pmp.securityContext" . | nindent 10 }}
+          ports:
+            - {name: http, containerPort: {{ .port }}}
+          env:
+            {{- include "pmp.commonEnv" $ | nindent 12 }}
+            - {name: HTTP_PORT, value: {{ .port | quote }}}
+            {{- if .db }}
+            {{- include "pmp.dbEnv" $ | nindent 12 }}
+            - {name: DB_USER, value: {{ printf "%s_svc" .name }}}
+            {{- end }}
+            {{- if .kafka }}
+            {{- include "pmp.kafkaEnv" $ | nindent 12 }}
+            {{- end }}
+            {{- if .s3 }}
+            {{- include "pmp.s3Env" $ | nindent 12 }}
+            {{- end }}
+            {{- if eq .name "gateway" }}
+            - {name: GATEWAY_ROUTES_FILE, value: /app/routes.yaml}
+            - {name: AUTH_BASE_URL, value: "http://auth:3000"}
+            - {name: BACKEND_BASE_URL, value: "http://backend:8000"}
+            - {name: INTERNAL_JWT_PRIVATE_KEY_PATH, value: /run/keys/internal-jwt.key}
+            {{- else if eq .name "auth" }}
+            - {name: DB_SCHEMA, value: auth}
+            - {name: BETTER_AUTH_SECRET_PATH, value: /run/keys/better-auth.secret}
+            {{- else if eq .name "backend" }}
+            - {name: INTERNAL_JWT_PUBLIC_KEY_PATH, value: /run/keys/internal-jwt.pub}
+            - {name: CLOUDFRONT_PRIVATE_KEY_PATH, value: /run/keys/cloudfront.key}
+            - {name: CLOUDFRONT_KEY_PAIR_ID, value: {{ $v.cloudfrontKeyPairId | quote }}}
+            - {name: DEMO_UPLOAD_ENABLED, value: {{ $v.demoUploadEnabled | quote }}}
+            {{- end }}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 5
+          resources:
+            {{- if eq .name "worker" }}
+            # What one job really uses (hashing + multipart copy). Honest
+            # requests are what make extra workers pend, so the cluster
+            # autoscaler adds a node for them.
+            requests: {cpu: 500m, memory: 512Mi}
+            limits: {memory: 1Gi}
+            {{- else }}
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 512Mi}
+            {{- end }}
+          volumeMounts:
+            {{- if .keys }}
+            - {name: keys, mountPath: /run/keys, readOnly: true}
+            {{- end }}
+            {{- if .db }}
+            - {name: rds-ca, mountPath: /etc/rds, readOnly: true}
+            {{- end }}
+            {{- if eq .name "gateway" }}
+            - {name: routes, mountPath: /app/routes.yaml, subPath: routes.yaml, readOnly: true}
+            {{- end }}
+      volumes:
+        {{- if .keys }}
+        {{- include "pmp.keysVolume" .keys | nindent 8 }}
+        {{- end }}
+        {{- if .db }}
+        {{- include "pmp.rdsCaVolume" . | nindent 8 }}
+        {{- end }}
+        {{- if eq .name "gateway" }}
+        - name: routes
+          configMap: {name: gateway-routes}
+        {{- end }}
+{{- if ne .name "worker" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}
+spec:
+  selector: {app: {{ .name }}}
+  {{- if eq .name "gateway" }}
+  type: NodePort
+  ports:
+    - {port: {{ .port }}, targetPort: http, nodePort: {{ $v.gatewayNodePort }}}
+  {{- else }}
+  ports:
+    - {port: {{ .port }}, targetPort: http}
+  {{- end }}
+{{- end }}
+{{- if or (eq .name "gateway") (eq .name "backend") }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .name }}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: {{ .name }}}
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: 70}
+{{- end }}
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-routes
+data:
+  routes.yaml: {{ .Values.gatewayRoutes | quote }}

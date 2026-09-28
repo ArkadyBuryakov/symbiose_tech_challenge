@@ -50,7 +50,7 @@ server {
 
         proxy_http_version 1.1;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Client-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-Host $host;
@@ -138,7 +138,7 @@ server {
         proxy_set_header Connection "";
         # Nothing may be added, removed or reordered: every signed header must
         # reach S3 exactly as the browser sent it.
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Client-IP $remote_addr;
 
         proxy_request_buffering off;
         proxy_buffering off;

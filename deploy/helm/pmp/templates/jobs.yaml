@@ -1,0 +1,53 @@
+# Helm hooks: the catalogue schema first, then BetterAuth's tables (they need
+# the `auth` schema and role that the migrate Job creates). The broker and its
+# topics come from the pmp-kafka chart, installed first.
+{{- $jobs := list
+  (dict "name" "migrate" "weight" "0" "image" "migrate" "sa" "migrate")
+  (dict "name" "migrate-auth" "weight" "1" "image" "auth" "sa" "auth")
+}}
+{{- range $jobs }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .name }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: {{ .weight | quote }}
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ .sa }}
+      containers:
+        - name: {{ .name }}
+          image: {{ include "pmp.image" (dict "Values" $.Values "name" .image) }}
+          {{- include "pmp.securityContext" . | nindent 10 }}
+          {{- if eq .name "migrate" }}
+          command: [sh, -c, 'DB_PASSWORD="$(cat /run/keys/db_master_password)" exec python ops/db/bootstrap.py']
+          env:
+            {{- include "pmp.commonEnv" $ | nindent 12 }}
+            {{- include "pmp.dbEnv" (dict "Values" $.Values "auth" "password") | nindent 12 }}
+            - {name: DB_USER, value: {{ $.Values.db.masterUser | quote }}}
+            - {name: SERVICE_DB_AUTH, value: iam}
+          volumeMounts:
+            - {name: keys, mountPath: /run/keys, readOnly: true}
+            - {name: rds-ca, mountPath: /etc/rds, readOnly: true}
+          {{- else }}
+          command: [node, dist/migrate.js]
+          env:
+            {{- include "pmp.commonEnv" $ | nindent 12 }}
+            {{- include "pmp.dbEnv" $ | nindent 12 }}
+            - {name: DB_USER, value: auth_svc}
+            - {name: DB_SCHEMA, value: auth}
+            - {name: BETTER_AUTH_SECRET_PATH, value: /run/keys/better-auth.secret}
+          volumeMounts:
+            - {name: keys, mountPath: /run/keys, readOnly: true}
+          {{- end }}
+      volumes:
+        {{- include "pmp.keysVolume" (ternary "migrate-keys" "auth-keys" (eq .name "migrate")) | nindent 8 }}
+        {{- include "pmp.rdsCaVolume" . | nindent 8 }}
+{{- end }}

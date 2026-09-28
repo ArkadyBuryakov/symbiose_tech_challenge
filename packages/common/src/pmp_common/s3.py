@@ -38,7 +38,10 @@ def make_s3_client(settings: S3Settings) -> S3Client:
 
     config = Config(
         signature_version="s3v4",
-        s3={"addressing_style": "path" if settings.force_path_style else "auto"},
+        # "virtual", not "auto": auto presigns against the global endpoint,
+        # which answers a new bucket outside us-east-1 with a redirect that a
+        # browser upload (CORS preflight) cannot follow.
+        s3={"addressing_style": "path" if settings.force_path_style else "virtual"},
         retries={"max_attempts": 5, "mode": "standard"},
         connect_timeout=5,
         read_timeout=60,
