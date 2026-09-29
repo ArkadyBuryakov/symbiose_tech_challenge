@@ -95,16 +95,16 @@ The sign-in form is at the top of the datasets page while you are signed out.
 ### Adding tenants and users
 
 ```bash
-make add-tenant slug=acme name="Acme Corp"
-make add-user email=carol@acme.test password=carol-password-1 tenant=acme role=owner
-make add-user email=ops@example.test password=ops-password-1 admin=1   # platform admin
+make add-user email=carol@acme.test password=carol-password-1
 make list-users
 ```
 
-`role` is `owner`, `admin` or `member` (default `member`); passwords need 10+
-characters. A user added without `tenant=` can sign in and see public datasets
-but cannot publish until added to a tenant. Re-running `add-user` for an
-existing email keeps their password and only adds the membership or role.
+`add-user` puts the user in the tenant named after their email domain
+(`acme-test` here), creating it if needed. The tenant's first user becomes its
+owner, later ones members. Passwords need 10+ characters. Re-running
+`add-user` for an existing email keeps their password and role. For other
+tenants, roles or platform admins, use the CLI directly:
+`docker compose run --rm auth node dist/users-cli.js` prints its usage.
 There is deliberately no public self-sign-up: tenants are provisioned by an
 operator.
 

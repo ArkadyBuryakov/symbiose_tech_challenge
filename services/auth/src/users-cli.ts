@@ -5,9 +5,14 @@
  *   node dist/users-cli.js add-tenant <slug> [name]
  *   node dist/users-cli.js add-user <email> <password> [--tenant <slug>] [--role owner|admin|member]
  *                                    [--name <display name>] [--platform-admin]
+ *
+ * Without --tenant, the user joins the tenant named after their email domain
+ * (a@acme.com -> `acme-com`), created if missing. Without --role, the tenant's
+ * first member becomes its owner and later ones members.
  *   node dist/users-cli.js list
  *
- * Wrapped by `make add-tenant`, `make add-user` and `make list-users`.
+ * Wrapped by `make add-tenant`, `make add-user`, `make aws-add-user` and
+ * `make list-users`.
  *
  * Public sign-up is disabled, so users are created with the admin plugin's
  * server-side `createUser` (BetterAuth owns password hashing). Memberships are
@@ -27,7 +32,8 @@ export interface NewUser {
   name: string;
   /** Organization id (not slug) to add the user to, if any. */
   tenantId: string | null;
-  role: TenantRole;
+  /** null: owner if the tenant has no members yet, else member; an existing role is kept. */
+  role: TenantRole | null;
   platformAdmin: boolean;
 }
 
@@ -111,8 +117,10 @@ export async function addUser(pool: Pool, auth: Auth, user: NewUser): Promise<st
   if (user.tenantId) {
     await pool.query(
       `INSERT INTO "member" (id, "organizationId", "userId", role, "createdAt")
-       VALUES ($1, $2, $3, $4, now())
-       ON CONFLICT (id) DO UPDATE SET role = EXCLUDED.role`,
+       VALUES ($1, $2, $3, COALESCE($4, CASE WHEN EXISTS
+                 (SELECT 1 FROM "member" WHERE "organizationId" = $2) THEN 'member' ELSE 'owner' END),
+               now())
+       ON CONFLICT (id) DO UPDATE SET role = COALESCE($4, "member".role)`,
       [`mem_${user.tenantId}_${userId}`, user.tenantId, userId, user.role],
     );
   }
@@ -125,15 +133,25 @@ async function addUserCommand(pool: Pool, auth: Auth, args: string[]): Promise<v
   if (!email || !password) usage("add-user needs <email> <password>");
   if (password.length < 10) usage("password must be at least 10 characters");
 
-  const role = (flags.role ?? "member") as TenantRole;
-  if (!TENANT_ROLES.includes(role)) usage(`role must be one of ${TENANT_ROLES.join(", ")}`);
-  const tenant = typeof flags.tenant === "string" ? flags.tenant : null;
-  const tenantId = tenant ? await organizationId(pool, tenant) : null;
-  if (tenant && !tenantId)
-    usage(`tenant '${tenant}' does not exist — create it with add-tenant first`);
+  const role = typeof flags.role === "string" ? (flags.role as TenantRole) : null;
+  if (role && !TENANT_ROLES.includes(role))
+    usage(`role must be one of ${TENANT_ROLES.join(", ")}`);
+
+  let tenant: string;
+  let tenantId: string | null;
+  if (typeof flags.tenant === "string") {
+    tenant = flags.tenant;
+    tenantId = await organizationId(pool, tenant);
+    if (!tenantId) usage(`tenant '${tenant}' does not exist — create it with add-tenant first`);
+  } else {
+    const domain = email.split("@")[1]?.toLowerCase();
+    if (!domain) usage("email has no domain");
+    tenant = domain.replace(/[^a-z0-9]+/g, "-").slice(0, 63);
+    tenantId = await addTenant(pool, tenant, domain);
+  }
 
   const platformAdmin = flags["platform-admin"] === true;
-  await addUser(pool, auth, {
+  const userId = await addUser(pool, auth, {
     email,
     password,
     name: typeof flags.name === "string" ? flags.name : email.split("@")[0]!,
@@ -141,15 +159,13 @@ async function addUserCommand(pool: Pool, auth: Auth, args: string[]): Promise<v
     role,
     platformAdmin,
   });
+  const member = await pool.query<{ role: string }>(
+    `SELECT role FROM "member" WHERE "organizationId" = $1 AND "userId" = $2`,
+    [tenantId, userId],
+  );
   process.stdout.write(`user ${email} ready\n`);
   if (platformAdmin) process.stdout.write("  platform admin\n");
-  if (tenantId) process.stdout.write(`  ${role} of tenant '${tenant}'\n`);
-  else if (!platformAdmin) {
-    process.stdout.write(
-      "  note: no --tenant given; this user can sign in and read public datasets,\n" +
-        "  but cannot publish until added to a tenant.\n",
-    );
-  }
+  process.stdout.write(`  ${member.rows[0]?.role} of tenant '${tenant}'\n`);
 }
 
 async function list(pool: Pool): Promise<void> {

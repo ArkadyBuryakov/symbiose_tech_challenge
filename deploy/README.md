@@ -36,14 +36,28 @@ In `terraform/variables.tf`; override with `-var` or a `terraform.tfvars`:
 
 ## After the first apply
 
-Create users with the auth CLI inside the cluster. `make seed` is not meant for
-this: its users have well-known passwords, and the site is public.
+Create users with `make aws-add-user`. `make seed` is not meant for this: its
+users have well-known passwords, and the site is public.
 
 ```sh
-$(terraform -chdir=deploy/terraform output -raw kubeconfig_command)
-kubectl -n pmp exec deploy/auth -- node dist/users-cli.js add-tenant acme "Acme Corp"
-kubectl -n pmp exec deploy/auth -- node dist/users-cli.js add-user a@acme.com '<password>' --tenant acme --role owner
+make aws-add-user email=a@acme.com password='<password>'
 ```
+
+As with `make add-user`, the user joins the tenant of their email domain
+(`acme-com`), created if missing; its first user is the owner. For anything
+else, run the CLI in the pod:
+`kubectl -n pmp exec deploy/auth -- node dist/users-cli.js`.
+
+## Checking private tiles through CloudFront
+
+```sh
+make aws-demo email=a@acme.com password='<password>'
+```
+
+Signs in as that user, publishes a private archive, then reads it through
+CloudFront: a cache miss with the signed cookies, a cache hit on the repeat,
+and a 403 without them. Needs `demo_upload_enabled = true` (as in
+`terraform.tfvars`).
 
 ## Cost
 

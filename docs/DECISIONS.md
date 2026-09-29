@@ -160,7 +160,7 @@ so every `Set-Cookie` survives. The upstream client keeps no cookie jar; one
 did, and it leaked sessions between callers.
 
 **Self sign-up is disabled.** Tenants and users are provisioned by an operator
-(`make seed`, `make add-tenant`, `make add-user`). A public sign-up endpoint
+(`make seed`, `make add-user`, `make aws-add-user`). A public sign-up endpoint
 would let anyone create accounts on a multi-tenant platform.
 
 **Single-membership users need not pick an organization.** `/internal/verify`

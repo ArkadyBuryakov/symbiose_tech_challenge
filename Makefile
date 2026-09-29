@@ -94,11 +94,9 @@ add-tenant: ## Create a tenant: make add-tenant slug=acme name="Acme Corp"
 	@$(AUTH_CLI) add-tenant "$(slug)" "$(name)"
 
 .PHONY: add-user
-add-user: ## Create a user: make add-user email=a@b.c password=... tenant=tenant-a role=member
-	@test -n "$(email)" -a -n "$(password)" || (echo 'usage: make add-user email=... password=... [tenant=slug] [role=owner|admin|member] [name="..."] [admin=1]' && exit 1)
-	@$(AUTH_CLI) add-user "$(email)" "$(password)" \
-		$(if $(tenant),--tenant "$(tenant)") $(if $(role),--role "$(role)") \
-		$(if $(name),--name "$(name)") $(if $(admin),--platform-admin)
+add-user: ## Create a user in the tenant of their email domain: make add-user email=a@acme.com password=...
+	@test -n "$(email)" -a -n "$(password)" || (echo 'usage: make add-user email=... password=...' && exit 1)
+	@$(AUTH_CLI) add-user "$(email)" "$(password)"
 
 .PHONY: list-users
 list-users: ## List users with their tenants and roles
@@ -140,6 +138,17 @@ TF := terraform -chdir=deploy/terraform
 aws-up: ## Build, push and deploy everything to AWS (deploy/README.md)
 	$(TF) init -input=false
 	$(TF) apply
+
+.PHONY: aws-add-user
+aws-add-user: ## Same as add-user, on the AWS deployment: make aws-add-user email=... password=...
+	@test -n "$(email)" -a -n "$(password)" || (echo 'usage: make aws-add-user email=... password=...' && exit 1)
+	@$$($(TF) output -raw kubeconfig_command) >/dev/null
+	@kubectl -n pmp exec deploy/auth -- node dist/users-cli.js add-user "$(email)" "$(password)"
+
+.PHONY: aws-demo
+aws-demo: ## Publish a private archive on AWS; show CloudFront miss, hit and 403: make aws-demo email=... password=... [f=file.pmtiles]
+	@test -n "$(email)" -a -n "$(password)" || (echo 'usage: make aws-demo email=... password=... [f=file.pmtiles]' && exit 1)
+	@BASE_URL="$$($(TF) output -raw url)" ./scripts/aws-demo.sh "$(email)" "$(password)" $(f)
 
 .PHONY: aws-down
 aws-down: ## Destroy everything `aws-up` created
