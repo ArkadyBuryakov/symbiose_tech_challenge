@@ -1,21 +1,48 @@
-# ADOT collector: the services' OTLP spans -> AWS X-Ray.
+# ADOT collector: the services' OTLP spans -> AWS X-Ray, and every app pod's
+# /metrics -> Amazon Managed Prometheus.
+{{- define "pmp.otelConfig" -}}
+extensions:
+  sigv4auth: {region: {{ .Values.region | quote }}, service: aps}
+receivers:
+  otlp:
+    protocols:
+      grpc: {endpoint: "0.0.0.0:4317"}
+  prometheus:
+    config:
+      scrape_configs:
+        # Each pod, not each Service, so replicas are not merged. `job` is
+        # the app name, as the local Prometheus and the dashboard expect.
+        - job_name: pods
+          scrape_interval: 30s
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces: {names: [{{ .Release.Namespace }}]}
+          relabel_configs:
+            - {action: keep, source_labels: [__meta_kubernetes_pod_label_app], regex: "gateway|auth|backend|worker"}
+            - {action: keep, source_labels: [__meta_kubernetes_pod_container_port_name], regex: http}
+            - {source_labels: [__meta_kubernetes_pod_label_app], target_label: job}
+            - {source_labels: [__meta_kubernetes_pod_name], target_label: instance}
+processors:
+  batch: {}
+exporters:
+  awsxray: {region: {{ .Values.region | quote }}}
+  prometheus_remote_write:
+    endpoint: {{ .Values.ampRemoteWriteUrl | quote }}
+    auth: {authenticator: sigv4auth}
+service:
+  extensions: [sigv4auth]
+  pipelines:
+    traces: {receivers: [otlp], processors: [batch], exporters: [awsxray]}
+    metrics: {receivers: [prometheus], processors: [batch], exporters: [prometheus_remote_write]}
+{{- end }}
+
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: otel-collector
 data:
   config.yaml: |
-    receivers:
-      otlp:
-        protocols:
-          grpc: {endpoint: "0.0.0.0:4317"}
-    processors:
-      batch: {}
-    exporters:
-      awsxray: {region: {{ .Values.region | quote }}}
-    service:
-      pipelines:
-        traces: {receivers: [otlp], processors: [batch], exporters: [awsxray]}
+{{- include "pmp.otelConfig" . | nindent 4 }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -27,6 +54,9 @@ spec:
   template:
     metadata:
       labels: {app: otel-collector}
+      annotations:
+        # The collector does not reload its config; a change restarts it.
+        checksum/config: {{ include "pmp.otelConfig" . | sha1sum }}
     spec:
       serviceAccountName: otel-collector
       containers:
@@ -55,3 +85,25 @@ spec:
   selector: {app: otel-collector}
   ports:
     - {name: otlp, port: 4317, targetPort: otlp}
+---
+# Pod discovery for the prometheus receiver, in this namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: otel-collector
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: otel-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: otel-collector
+subjects:
+  - kind: ServiceAccount
+    name: otel-collector

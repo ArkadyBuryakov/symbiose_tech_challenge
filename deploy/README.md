@@ -20,6 +20,8 @@ make aws-down   # terraform destroy        (~20-30 min)
 * AWS credentials for the target account in your shell, e.g.
   `export AWS_PROFILE=symbiose-demo`. The identity that runs `apply` becomes
   cluster admin.
+* IAM Identity Center enabled for the account (or its organization): Amazon
+  Managed Grafana signs users in with it.
 * State is local (`terraform/terraform.tfstate`). Keep it: `make aws-down`
   needs it, and it contains the generated signing keys.
 
@@ -32,6 +34,7 @@ In `terraform/variables.tf`; override with `-var` or a `terraform.tfvars`:
 | `region` | `eu-west-1` | everything except CloudFront |
 | `name` | `pmp` | prefix for every resource |
 | `demo_upload_enabled` | `false` | serve `upload.html` and presign browser uploads |
+| `grafana_admin_user_ids` | `[]` | Identity Center user IDs made Grafana admins |
 | `node_instance_type` | `t3.large` | two nodes, up to four |
 
 ## After the first apply
@@ -47,6 +50,23 @@ As with `make add-user`, the user joins the tenant of their email domain
 (`acme-com`), created if missing; its first user is the owner. For anything
 else, run the CLI in the pod:
 `kubectl -n pmp exec deploy/auth -- node dist/users-cli.js`.
+
+## Metrics dashboard
+
+The ADOT collector scrapes every app pod's `/metrics` into Amazon Managed
+Prometheus. Amazon Managed Grafana has it as its default data source, with the
+local *PMTiles platform* dashboard already installed. Open
+`terraform output grafana_url` and sign in with Identity Center.
+
+To be allowed in, put your Identity Center user ID (Identity Center console →
+Users → your user → *User ID*) in `terraform.tfvars` and apply:
+
+```hcl
+grafana_admin_user_ids = ["<user id>"]
+```
+
+The *Private tile authorisations* panel stays empty on AWS: CloudFront checks
+the cookies there, and its numbers are in CloudFront's own console reports.
 
 ## Checking private tiles through CloudFront
 

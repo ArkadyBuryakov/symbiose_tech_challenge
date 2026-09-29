@@ -16,6 +16,12 @@ variable "demo_upload_enabled" {
   default     = false
 }
 
+variable "grafana_admin_user_ids" {
+  description = "IAM Identity Center user IDs made Grafana admins (Identity Center console -> Users -> user -> User ID)."
+  type        = list(string)
+  default     = []
+}
+
 variable "node_instance_type" {
   type    = string
   default = "t3.large"

@@ -117,6 +117,7 @@ resource "helm_release" "app" {
     }
     cloudfrontKeyPairId = aws_cloudfront_public_key.cookies.id
     gatewayRoutes       = file("${local.repo_root}/services/gateway/routes.yaml")
+    ampRemoteWriteUrl   = "${aws_prometheus_workspace.this.prometheus_endpoint}api/v1/remote_write"
   })]
 
   depends_on = [

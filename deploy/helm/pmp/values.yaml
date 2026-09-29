@@ -27,6 +27,7 @@ secrets:
 cloudfrontKeyPairId: ""
 
 gatewayRoutes: ""     # services/gateway/routes.yaml
+ampRemoteWriteUrl: "" # Amazon Managed Prometheus remote-write endpoint
 gatewayNodePort: 30080
 
 worker:

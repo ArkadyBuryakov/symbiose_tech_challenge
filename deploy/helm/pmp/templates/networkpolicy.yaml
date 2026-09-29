@@ -1,5 +1,6 @@
-# auth and backend accept traffic only from the gateway (kubelet probes are
-# always allowed). Enforced by the VPC CNI's network policy agent.
+# auth and backend accept traffic only from the gateway, and the collector
+# scraping /metrics (kubelet probes are always allowed). Enforced by the VPC
+# CNI's network policy agent.
 {{- range list "auth" "backend" }}
 ---
 apiVersion: networking.k8s.io/v1
@@ -14,4 +15,6 @@ spec:
     - from:
         - podSelector:
             matchLabels: {app: gateway}
+        - podSelector:
+            matchLabels: {app: otel-collector}
 {{- end }}
