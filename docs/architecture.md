@@ -2,6 +2,8 @@
 
 ## Web app
 
+Details, alternatives and cost: [decisions/web_app.md](decisions/web_app.md)
+
 Simple static web app to demo all sides of application. From S3 upload to serving pmtiles.
 - / - Datasets
   - Auth form
@@ -15,13 +17,17 @@ Simple static web app to demo all sides of application. From S3 upload to servin
 
 ## Edge
 
-Internet-facing entry point (nginx locally, CloudFront on AWS - see `docs/aws-mapping.md`):
+Details, alternatives and cost: [decisions/edge.md](decisions/edge.md)
+
+Internet-facing entry point (nginx locally, CloudFront on AWS - see [aws-mapping.md](aws-mapping.md)):
 - Serves the static web app
 - Proxies `/api/*` to API Gateway
 - Serves tiles from serving S3 (see Tile serving)
 - Proxies presigned staging uploads to S3 (local only)
 
 ## API Gateway service
+
+Details, alternatives and cost: [decisions/api_gateway.md](decisions/api_gateway.md)
 
 Single entry point for `/api/*`:
 - Allowlist routing between backend and auth service (`routes.yaml`), anything else is 404
@@ -32,6 +38,8 @@ Single entry point for `/api/*`:
 
 ## Auth service
 
+Details, alternatives and cost: [decisions/auth_service.md](decisions/auth_service.md)
+
 Better Auth service to easily support:
 - AuthN (sessions) - authorization itself is enforced by gateway and backend
 - Tenants (Organizations) with roles
@@ -39,6 +47,8 @@ Better Auth service to easily support:
 - API Keys
 
 ## Backend service
+
+Details, alternatives and cost: [decisions/backend_service.md](decisions/backend_service.md)
 
 - Serves methods for web-client, except auth and tile serving
 - Creates dataset (by tenant+slug) and publication job, posts processing events to kafka
@@ -53,6 +63,8 @@ Better Auth service to easily support:
   - browser uploads pmtiles and calls POST-method with spec to run processing job
 
 ## Worker
+
+Details, alternatives and cost: [decisions/worker.md](decisions/worker.md)
 
 - Processing tasks
   - takes unprocessed events from kafka
@@ -74,6 +86,8 @@ Better Auth service to easily support:
 
 ## Kafka
 
+Details, alternatives and cost: [decisions/kafka.md](decisions/kafka.md)
+
 Transport for event-based communications:
 - processing job request
   - produced by backend (or worker's reconciler on re-emit), consumed by workers and backend (SSE)
@@ -84,7 +98,18 @@ Transport for event-based communications:
 
 ## Tile serving
 
+Details, alternatives and cost: [decisions/tile_serving.md](decisions/tile_serving.md)
+
 - Serving S3 bucket without access to internet, `public/` and `private/<tenant>/` prefixes
 - Edge serves S3 files (CloudFront as CDN cache on AWS, nginx locally)
   - public datasets served as is
   - private datasets require signed cookie to allow access to tenants subpath (checked by CloudFront on AWS, by edge-verifier locally)
+
+## Scaling
+
+Details, alternatives and cost: [decisions/scaling.md](decisions/scaling.md)
+
+- Tile reads and `/current` lookups are absorbed by the CDN cache, not the cluster
+- Gateway and backend: HPA on CPU, 2–6 pods
+- Worker: KEDA on consumer lag of `publication.requested`, 1–6 pods (one job per pod, capped by 6 partitions)
+- Nodes: Cluster Autoscaler, 2–4 × t3.large, grows when worker pods are pending, shrinks after ~10 min idle

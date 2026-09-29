@@ -53,6 +53,8 @@ These cost nothing extra:
 | NAT gateway data | $0.048 / GB processed | Mostly image pulls from ECR and public ECR: ≈ 1–2 GB per deploy, so ≈ $0.10. |
 | Cross-AZ traffic | $0.01 / GB each way | Pod ↔ RDS/Kafka/pod across the two AZs. Negligible at demo volume. RDS Multi-AZ replication is free. |
 | X-Ray | $5 / 1M traces stored after 100k free per month | Probe endpoints are not traced. |
+| Amazon Managed Grafana | $9 per active editor/admin user per month, $5 per viewer | Billed only for users who sign in that month. |
+| Amazon Managed Prometheus | $0.90 / 10M samples ingested, $0.03 / GB-month stored, $0.10 / 1B samples queried | ≈ 700 series (7 pods) scraped every 30 s is ≈ 2M samples/day, so ≈ $6/month. More replicas add series. |
 | S3 | $0.023 / GB-month | Staged uploads expire after 7 days. The published archives are what grows. |
 | ECR | $0.10 / GB-month | ≈ 0.5–1 GB per build. Old images are kept, so every rebuild adds a little until `make aws-down`. |
 | EC2 CPU credits | $0.05 / vCPU-hour of surplus | t3 nodes run in *unlimited* mode. This only applies if a node averages above its 30% baseline, which only a sustained publishing load would cause. |

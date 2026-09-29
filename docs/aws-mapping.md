@@ -27,15 +27,15 @@ below). The MSK settings and IAM are kept here as the production target.
 | `kafka-init` | Helm post-install hook Job of the broker's chart (`deploy/helm/kafka`) | The same `kafka-init.sh`. Terraform installs the platform chart only after it, so no service subscribes to a missing topic. On MSK it would need IAM auth flags. |
 | `s3-init` | Terraform | Buckets, policies, lifecycle, OAC. |
 | `dev-keys/` | **Secrets Manager** + Secrets Store CSI driver | Mounted at the *same paths* (`/run/keys/...`). |
-| Prometheus / Grafana | Amazon Managed Prometheus / Managed Grafana | Or CloudWatch Container Insights. Not deployed yet. |
+| Prometheus / Grafana | Amazon Managed Prometheus / Managed Grafana | The ADOT collector scrapes the pods and remote-writes to AMP. Grafana signs in with IAM Identity Center; Terraform installs the data source and the local dashboard. |
 | Jaeger | AWS X-Ray via the ADOT collector | Services already speak OTLP. |
 
 ### CloudFront behaviours (what the nginx config becomes)
 
 | Path | Origin | Viewer policy | Cache |
 |---|---|---|---|
-| `/tiles/public/*` | S3 `publish` via **OAC** | public | `CachingOptimized`; objects are immutable. A CloudFront Function strips `/tiles` (the keys are `public/...`) |
-| `/tiles/private/*` | S3 `publish` via OAC | **Restrict viewer access** — trusted key group holding the public half of the cookie-signing key | `CachingOptimized`, cookies *not* in the cache key |
+| `/tiles/public/*` | S3 `publish` via **OAC** | public | `pmp-tiles` (`CachingOptimized` with a 30-day max TTL); objects are immutable. A CloudFront Function strips `/tiles` (the keys are `public/...`) |
+| `/tiles/private/*` | S3 `publish` via OAC | **Restrict viewer access** — trusted key group holding the public half of the cookie-signing key | `pmp-tiles`, cookies *not* in the cache key |
 | `/api/*` | internal ALB (CloudFront VPC origin) → gateway NodePort | public | `CachingDisabled`, except `/api/v1/datasets/*/current` (honours the 30 s `Cache-Control`). A CloudFront Function sets `X-Client-IP` from the viewer address, which the gateway rate-limits on |
 | `/staging-upload/*` | **not needed** — presign directly against the S3 regional endpoint | — | — |
 | `/*` | S3 `web` bucket | public | objects carry `Cache-Control: no-cache` |
