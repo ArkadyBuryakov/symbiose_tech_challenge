@@ -8,7 +8,7 @@
 #   2. upload an archive straight to the staging bucket (presigned PUT),
 #   3. publish it as a private dataset and wait for the worker,
 #   4. with the signed tile cookies: the first range read is a CloudFront miss,
-#      the second the same bytes from the edge cache,
+#      and repeating it is soon served from the edge cache (the 3rd read),
 #   5. without them: 403, although the bytes are now in the cache.
 #
 # Archives are content-addressed, so re-publishing the same file would reuse a
@@ -113,11 +113,18 @@ echo "  1st read: HTTP ${CODE}, x-cache: ${CACHE}, pop: ${POP}, first byte ${TTF
 [[ "$CODE" == "206" && "$CACHE" == "Miss" ]] || fail "expected 206 and a cache miss"
 ok "cache miss — CloudFront fetched it from S3"
 
-read -r CODE CACHE POP2 TTFB TOTAL < <(fetch -b "$JAR")
-echo "  2nd read: HTTP ${CODE}, x-cache: ${CACHE}, pop: ${POP2}, first byte ${TTFB}s, total ${TOTAL}s"
+# Measured on this stack: the 2nd read of a new archive is still a Miss however
+# long we wait, and the 3rd is a Hit. x-cache reports only the edge location;
+# the regional edge cache behind it keeps the bytes from the 1st read, and the
+# edge stores them on the 2nd, so S3 is read once.
+for n in 2 3 4; do
+    read -r CODE CACHE POP2 TTFB TOTAL < <(fetch -b "$JAR")
+    echo "  read ${n}: HTTP ${CODE}, x-cache: ${CACHE}, pop: ${POP2}, first byte ${TTFB}s, total ${TOTAL}s"
+    [[ "$CACHE" == "Hit" ]] && break
+done
 [[ "$CODE" == "206" && "$CACHE" == "Hit" ]] \
     || fail "expected 206 and a cache hit$([[ "$POP" != "$POP2" ]] && echo " (answered by another edge: ${POP} -> ${POP2})")"
-ok "cache hit — served from the edge"
+ok "cache hit on read ${n} — served from the edge"
 
 # --------------------------------------------------------------------------
 say "Fetching the same bytes without cookies"

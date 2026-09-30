@@ -15,3 +15,7 @@ spec:
         consumerGroup: publication-worker
         topic: publication.requested
         lagThreshold: {{ .Values.worker.lagThreshold | quote }}
+        # As the worker's auto.offset.reset. With KEDA's default (latest), a
+        # partition with no committed offset yet counts as lag 1, so an idle
+        # topic that never had a message held 6 workers.
+        offsetResetPolicy: earliest
