@@ -1,9 +1,10 @@
 # Setting up CI/CD
 
-`.github/workflows/pipeline.yml` tests the code and deploys the AWS stack with
-Terraform. It has no automatic triggers; it runs only from **Actions → pipeline
-→ Run workflow**. This page is the one-time setup its `deploy` job needs. The
-`test` job needs none.
+`.github/workflows/publish.yml` tests the code and deploys the AWS stack with
+Terraform; `.github/workflows/destroy.yml` removes it. Neither has automatic
+triggers; they run only from **Actions → publish / destroy → Run workflow**.
+This page is the one-time setup their Terraform jobs need. The `test` job
+needs none.
 
 | What | Why |
 |---|---|
@@ -61,7 +62,13 @@ The trust policy is the security boundary. `sub` names the only runs allowed:
 jobs of this repository running in the `prod` environment. A fork, another
 branch outside `prod`'s rules, or another repository gets "not authorized".
 
+The token's `sub` starts with the repository's prefix, which GitHub reports; with
+immutable subjects (the default for new repositories) it carries the owner and
+repository IDs, e.g. `repo:owner@123/name@456`, so a renamed or recreated
+repository does not inherit the trust.
+
 ```sh
+SUB=$(gh api "repos/$REPO/actions/oidc/customization/sub" --jq .sub_claim_prefix)
 cat > trust.json <<EOF
 {
   "Version": "2012-10-17",
@@ -72,7 +79,7 @@ cat > trust.json <<EOF
     "Condition": {
       "StringEquals": {
         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-        "token.actions.githubusercontent.com:sub": "repo:${REPO}:environment:prod"
+        "token.actions.githubusercontent.com:sub": "${SUB}:environment:prod"
       }
     }
   }]
@@ -87,7 +94,7 @@ rm trust.json
 
 `AdministratorAccess` is what the Terraform needs as written: it creates IAM
 roles, the EKS cluster, CloudFront, RDS and more. The reviewer gate in step 5
-is what limits its use. Never widen `sub` to `repo:${REPO}:*`.
+is what limits its use. Never widen `sub` to `${SUB}:*`.
 
 ## 4. Repository variables
 
@@ -139,20 +146,9 @@ or each will try to create what the other already has. So if a stack made by
 make aws-down
 ```
 
-CI then builds its own stack on the first run with **apply** ticked, and from
-then on deploys go through the pipeline only. The pipeline has no destroy step;
-to remove a CI-made stack, destroy it from your machine against the same state
-(this needs step 7's access):
-
-```sh
-cd deploy/terraform
-printf 'terraform {\n  backend "s3" {}\n}\n' > backend_override.tf
-terraform init -reconfigure \
-  -backend-config="bucket=$BUCKET" -backend-config="key=pmp/terraform.tfstate" \
-  -backend-config="region=$AWS_REGION" -backend-config="use_lockfile=true"
-TF_VAR_region=$AWS_REGION terraform destroy   # the region CI deployed to
-rm backend_override.tf && terraform init -reconfigure   # back to local state
-```
+CI then builds its own stack on the first `publish` run with **apply** ticked,
+and from then on deploys go through CI only. To remove a CI-made stack, run
+`destroy`: it plans the destroy, and carries it out when **apply** is ticked.
 
 Handing a running stack over to CI (moving its state into the bucket) does not
 work as the Terraform stands: the cluster admits only its creator (next step),
@@ -186,16 +182,17 @@ is the default `name` input; use yours if you changed it.
 ## 8. Run it
 
 ```sh
-gh workflow run pipeline --repo "$REPO" -f apply=false   # plan only
+gh workflow run publish --repo "$REPO" -f apply=false   # plan only
 gh run watch --repo "$REPO"
 ```
 
 The `deploy` job waits for a reviewer's approval, then plans. Read the plan
-in the job log; run again with `-f apply=true` to apply it.
+in the job log; run again with `-f apply=true` to apply it. `destroy` works the
+same way.
 
-| Error in the `deploy` job | Cause |
+| Error in the `deploy` or `destroy` job | Cause |
 |---|---|
-| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The trust policy's `sub` does not match the run: the job must use `environment: prod`, and `REPO` must be exactly the repository |
+| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The trust policy's `sub` does not match the run: the job must use `environment: prod`, and `SUB` must be the prefix GitHub reports for the repository |
 | `Could not load credentials from any providers` | The `id-token: write` permission is missing, or `AWS_ROLE_ARN` is not set |
 | `Error acquiring the state lock` | Another run holds it; the `concurrency` group normally prevents this. After a cancelled run, `terraform force-unlock <id>` |
 | `Unauthorized` from the kubernetes or helm provider | The cluster was created by someone else (e.g. `make aws-up`), so the CI role has no access entry; see step 6 |

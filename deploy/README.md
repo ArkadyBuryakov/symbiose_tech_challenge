@@ -84,10 +84,11 @@ read: the edge caches a new archive on its 2nd), and a 403 without them. Needs `
 
 ## CI/CD (demo)
 
-`.github/workflows/pipeline.yml` has no automatic triggers: run it from
-**Actions → pipeline → Run workflow**. `test` runs `make lint` and `make test`;
+`.github/workflows/publish.yml` has no automatic triggers: run it from
+**Actions → publish → Run workflow**. `test` runs `make lint` and `make test`;
 `deploy` runs `terraform plan`, and `apply` too when the box is ticked. Terraform
 builds the images and upgrades the charts, as `make aws-up` does.
+`.github/workflows/destroy.yml` removes the CI-made stack the same way.
 
 Its `deploy` job needs a state bucket, an OIDC role, two repository variables
 and a `prod` environment. The step-by-step setup is in `docs/ci-cd.md`. A

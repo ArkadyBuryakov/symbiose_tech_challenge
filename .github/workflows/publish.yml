@@ -1,5 +1,5 @@
 # CI/CD for the AWS deployment. Demo only: it has no automatic triggers and
-# runs solely from Actions -> pipeline -> "Run workflow".
+# runs solely from Actions -> publish -> "Run workflow".
 #
 #   test    lint + unit tests (`make lint`, `make test`)
 #   deploy  terraform plan, and apply when `apply` is ticked. Terraform also
@@ -9,7 +9,7 @@
 # Setup it needs (docs/ci-cd.md): an OIDC role and a state bucket, the
 # repository variables AWS_ROLE_ARN, AWS_REGION and TF_STATE_BUCKET (optionally
 # GRAFANA_ADMIN_USER_IDS), and a `prod` environment with required reviewers.
-name: pipeline
+name: publish
 
 on:
   workflow_dispatch:
