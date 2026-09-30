@@ -176,7 +176,7 @@ event-schemas: ## Regenerate docs/events/*.schema.json from the Pydantic models
 .PHONY: test
 test: ## Run the unit tests (no containers required)
 	uv run pytest packages services -q
-	node --test web/tests/
+	node --test web/tests/*.test.js
 	cd services/auth && npm run --silent test --if-present
 
 .PHONY: e2e

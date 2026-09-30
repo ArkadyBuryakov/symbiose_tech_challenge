@@ -1,0 +1,93 @@
+# CI/CD for the AWS deployment. Demo only: it has no automatic triggers and
+# runs solely from Actions -> pipeline -> "Run workflow".
+#
+#   test    lint + unit tests (`make lint`, `make test`)
+#   deploy  terraform plan, and apply when `apply` is ticked. Terraform also
+#           builds and pushes the images and upgrades the Helm charts, exactly
+#           as `make aws-up` does locally.
+#
+# Setup it needs (docs/ci-cd.md): an OIDC role and a state bucket, the
+# repository variables AWS_ROLE_ARN, AWS_REGION and TF_STATE_BUCKET (optionally
+# GRAFANA_ADMIN_USER_IDS), and a `prod` environment with required reviewers.
+name: pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Apply the plan (otherwise plan only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: services/auth/package-lock.json
+      - run: uv sync --all-packages --frozen
+      - run: npm ci
+        working-directory: services/auth
+      - run: make lint
+      - run: make test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    # Required reviewers on `prod` approve the run; the OIDC role trusts only
+    # this environment's token.
+    environment: prod
+    # One deploy at a time; a second run waits instead of racing for the state.
+    concurrency:
+      group: deploy-prod
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TF_IN_AUTOMATION: "1"
+      # The stack's region, and Grafana admins as a JSON list of Identity
+      # Center user IDs (the committed terraform.tfvars has neither).
+      TF_VAR_region: ${{ vars.AWS_REGION }}
+      TF_VAR_grafana_admin_user_ids: ${{ vars.GRAFANA_ADMIN_USER_IDS || '[]' }}
+    defaults:
+      run:
+        working-directory: deploy/terraform
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      # Local runs keep their local state; only CI uses the S3 backend, via an
+      # override file (Terraform merges *_override.tf over the other files).
+      - name: Use the S3 state backend
+        run: |
+          cat > backend_override.tf <<'EOF'
+          terraform {
+            backend "s3" {}
+          }
+          EOF
+      - run: >-
+          terraform init -input=false
+          -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          -backend-config="key=pmp/terraform.tfstate"
+          -backend-config="region=${{ vars.AWS_REGION }}"
+          -backend-config="encrypt=true"
+          -backend-config="use_lockfile=true"
+
+      - run: terraform plan -input=false -out=tfplan
+      - if: inputs.apply
+        run: terraform apply -input=false tfplan

@@ -58,7 +58,7 @@ def _security_config(settings: KafkaSettings) -> dict[str, Any]:
 
     # --- STUB: AWS MSK IAM authentication (not used locally) ---------------
     def _oauth_cb(_config: str) -> tuple[str, float]:
-        from aws_msk_iam_sasl_signer import MSKAuthTokenProvider  # type: ignore[import-not-found]
+        from aws_msk_iam_sasl_signer import MSKAuthTokenProvider  # type: ignore[import-untyped]
 
         token, expiry_ms = MSKAuthTokenProvider.generate_auth_token(settings.aws_region)
         return token, expiry_ms / 1000.0

@@ -16,6 +16,7 @@ through an asynchronous workflow and show it in a browser.
 | Kafka-compatible broker | Redpanda; MSK as the production target — [kafka](docs/decisions/kafka.md) |
 | Request-facing vs background separation | backend (API) vs worker (Kafka consumer) |
 | Delivery: AWS vs Cloudflare R2 compared, one implemented | CloudFront + S3 implemented; R2 comparison with traffic and caching assumptions — [tile serving](docs/decisions/tile_serving.md#aws-cloudfront--s3-vs-cloudflare-r2) |
+| Traffic or publication jobs increase | CDN absorbs reads; HPA, KEDA on Kafka lag, Cluster Autoscaler — [scaling](docs/decisions/scaling.md) |
 | Private, tenant-only datasets | CloudFront signed cookies — [tile serving](docs/decisions/tile_serving.md) |
 
 ## 2. How it works
@@ -42,7 +43,8 @@ flowchart LR
 **→ [Architecture](docs/architecture.md)**: each component, with a page on how
 it works, the alternatives and the cost.
 Also: [AWS mapping](docs/aws-mapping.md) · [cost](docs/cost.md) ·
-[runbook](docs/runbook.md) · [decision log](docs/DECISIONS.md) ·
+[runbook](docs/runbook.md) · [CI/CD setup](docs/ci-cd.md) ·
+[decision log](docs/DECISIONS.md) ·
 [event schemas](docs/events/)
 
 ## 3. Quickstart (local)

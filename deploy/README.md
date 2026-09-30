@@ -59,7 +59,10 @@ local *PMTiles platform* dashboard already installed. Open
 `terraform output grafana_url` and sign in with Identity Center.
 
 To be allowed in, put your Identity Center user ID (Identity Center console →
-Users → your user → *User ID*) in `terraform.tfvars` and apply:
+Users → your user → *User ID*) in `deploy/terraform/local.auto.tfvars` and
+apply. Terraform reads that file automatically, and git ignores it, so personal
+IDs stay out of the repository (CI takes them from a repository variable
+instead, see `docs/ci-cd.md`):
 
 ```hcl
 grafana_admin_user_ids = ["<user id>"]
@@ -75,12 +78,24 @@ make aws-demo email=a@acme.com password='<password>'
 ```
 
 Signs in as that user, publishes a private archive, then reads it through
-CloudFront: a cache miss with the signed cookies, a cache hit on the repeat,
-and a 403 without them. Needs `demo_upload_enabled = true` (as in
+CloudFront: a cache miss with the signed cookies, then a cache hit (on the 3rd
+read: the edge caches a new archive on its 2nd), and a 403 without them. Needs `demo_upload_enabled = true` (as in
 `terraform.tfvars`).
+
+## CI/CD (demo)
+
+`.github/workflows/pipeline.yml` has no automatic triggers: run it from
+**Actions → pipeline → Run workflow**. `test` runs `make lint` and `make test`;
+`deploy` runs `terraform plan`, and `apply` too when the box is ticked. Terraform
+builds the images and upgrades the charts, as `make aws-up` does.
+
+Its `deploy` job needs a state bucket, an OIDC role, two repository variables
+and a `prod` environment. The step-by-step setup is in `docs/ci-cd.md`. A
+stack made by `make aws-up` and one made by CI must not coexist: they keep
+separate state.
 
 ## Cost
 
-About $0.41/hour ($10/day) while it is up. `make aws-down` removes all of it.
+About $0.43/hour ($10/day) while it is up. `make aws-down` removes all of it.
 The breakdown, ways to save, and what MSK would cost instead are in
 `docs/cost.md`.

@@ -41,3 +41,5 @@ services/auth/dist/
 .terraform/
 *.tfstate
 *.tfstate.*
+# Personal inputs, e.g. grafana_admin_user_ids (deploy/README.md)
+*.auto.tfvars
