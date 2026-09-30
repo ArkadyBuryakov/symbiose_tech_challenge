@@ -46,6 +46,10 @@ users have well-known passwords, and the site is public.
 make aws-add-user email=a@acme.com password='<password>'
 ```
 
+For a stack made by CI (no local state), `make cluster-add-user` does the same
+on the current kubectl context; point it at the cluster with
+`aws eks update-kubeconfig --region <region> --name pmp` first.
+
 As with `make add-user`, the user joins the tenant of their email domain
 (`acme-com`), created if missing; its first user is the owner. For anything
 else, run the CLI in the pod:

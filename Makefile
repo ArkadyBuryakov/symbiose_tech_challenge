@@ -145,6 +145,11 @@ aws-add-user: ## Same as add-user, on the AWS deployment: make aws-add-user emai
 	@$$($(TF) output -raw kubeconfig_command) >/dev/null
 	@kubectl -n pmp exec deploy/auth -- node dist/users-cli.js add-user "$(email)" "$(password)"
 
+.PHONY: cluster-add-user
+cluster-add-user: ## Same as aws-add-user, on the current kubectl context (e.g. a CI-made stack): make cluster-add-user email=... password=...
+	@test -n "$(email)" -a -n "$(password)" || (echo 'usage: make cluster-add-user email=... password=...' && exit 1)
+	@kubectl -n pmp exec deploy/auth -- node dist/users-cli.js add-user "$(email)" "$(password)"
+
 .PHONY: aws-demo
 aws-demo: ## Publish a private archive on AWS; show CloudFront miss, hit and 403: make aws-demo email=... password=... [f=file.pmtiles]
 	@test -n "$(email)" -a -n "$(password)" || (echo 'usage: make aws-demo email=... password=... [f=file.pmtiles]' && exit 1)
