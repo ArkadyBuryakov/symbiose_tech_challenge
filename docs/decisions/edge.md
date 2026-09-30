@@ -53,8 +53,8 @@ sequenceDiagram
 
 ## Cost
 
-| Option | Estimate (eu-west-1, demo → 1 TB/month) |
+| Option | Estimate (demo → 1 TB/month) |
 |---|---|
 | Chosen: CloudFront | $0 in the free tier (1 TB, 10M requests); beyond it $0.085/GB + $0.012/10k HTTPS requests → ≈ $85/TB. CloudFront Functions $0.10/1M after 2M free |
-| ALB + proxy pods | ALB ≈ $18/month + LCUs, 2 proxy pods ≈ $7/month; data out $0.09/GB → ≈ $110/TB with no caching, and origin load grows with every read |
-| API Gateway HTTP API | $1.00/1M requests + $0.09/GB out; a map view is dozens of range requests, so 10M reads ≈ $10 + data, plus a CDN anyway |
+| ALB + proxy pods | ALB ≈ $20/month + LCUs, 2 proxy pods ≈ $7/month; data out $0.09/GB → ≈ $110/TB with no caching, and origin load grows with every read |
+| API Gateway HTTP API | $1.20/1M requests + $0.09/GB out; a map view is dozens of range requests, so 10M reads ≈ $12 + data, plus a CDN anyway |

@@ -84,8 +84,8 @@ sequenceDiagram
 
 ## Cost
 
-| Option | Estimate (eu-west-1) |
+| Option | Estimate |
 |---|---|
-| Chosen: 1–6 pods × 500m / 512 Mi | 1 idle pod ≈ $17/month of t3.large capacity; a full backlog (6 pods) adds 1–2 nodes ≈ $0.09–0.18/h while it drains |
+| Chosen: 1–6 pods × 500m / 512 Mi | 1 idle pod ≈ $18/month of t3.large capacity; a full backlog (6 pods) adds 1–2 nodes ≈ $0.10–0.19/h while it drains |
 | Lambda | 2 GB × 60 s per job ≈ $0.002/job → 10k jobs ≈ $20/month; $0 idle. Plus SQS ≈ $0.40/1M requests |
-| Fargate task per job | 0.5 vCPU / 1 GB ≈ $0.025/h → ≈ $0.001 per 2-min job; 10k jobs ≈ $10/month; $0 idle, but Step Functions/EventBridge extra |
+| Fargate task per job | 0.5 vCPU / 1 GB ≈ $0.028/h → ≈ $0.001 per 2-min job; 10k jobs ≈ $10/month; $0 idle, but Step Functions/EventBridge extra |

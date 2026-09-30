@@ -70,8 +70,8 @@ sequenceDiagram
 
 ## Cost
 
-| Option | Estimate (eu-west-1) |
+| Option | Estimate |
 |---|---|
-| Chosen: 2–6 pods (HPA) | Idle ≈ $7/month of node capacity (2 × 100m / 256 Mi); shares RDS db.t4g.micro Multi-AZ ≈ $31/month with auth and worker; RDS Proxy (recommended in prod) + ≈ $22/month |
-| Synchronous API | No broker/worker, but API pods sized for copies (≈ 500m / 512 Mi each, ≈ $17/month per pod) and still needs the same RDS |
-| Lambda + Step Functions | Lambda ≈ $0.0000167/GB-s; Step Functions $0.025/1k transitions → ≈ $1–5/month at demo volume; replaces EKS nodes + control plane (≈ $210/month) but not RDS |
+| Chosen: 2–6 pods (HPA) | Idle ≈ $7/month of node capacity (2 × 100m / 256 Mi); shares RDS db.t4g.micro Multi-AZ ≈ $32/month with auth and worker; RDS Proxy (recommended in prod) + ≈ $26/month |
+| Synchronous API | No broker/worker, but API pods sized for copies (≈ 500m / 512 Mi each, ≈ $18/month per pod) and still needs the same RDS |
+| Lambda + Step Functions | Lambda ≈ $0.0000167/GB-s; Step Functions $0.025/1k transitions → ≈ $1–5/month at demo volume; replaces EKS nodes + control plane (≈ $215/month) but not RDS |

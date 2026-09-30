@@ -92,7 +92,7 @@ class KafkaSettings(BaseSettings):
     bootstrap_servers: str = "kafka:9092"
     security_protocol: str = "PLAINTEXT"
     sasl_mechanism: SaslMechanism = "none"
-    aws_region: str = "eu-west-1"
+    aws_region: str = "eu-central-1"
     consumer_group: str = "publication-worker"
     # Delivery/consumer tuning; exposed so it can be adjusted per environment.
     request_timeout_ms: int = 30_000

@@ -1,7 +1,7 @@
 variable "region" {
   description = "AWS region for everything except CloudFront (global)."
   type        = string
-  default     = "eu-west-1"
+  default     = "eu-central-1"
 }
 
 variable "name" {

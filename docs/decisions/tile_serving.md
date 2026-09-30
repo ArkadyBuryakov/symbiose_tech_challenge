@@ -72,10 +72,10 @@ Configuration: `deploy/terraform/cdn.tf`. Cookie signing:
 
 ## Cost
 
-| Option | Estimate (eu-west-1) |
+| Option | Estimate |
 |---|---|
-| Chosen: S3 + CloudFront | S3 $0.023/GB-month stored; CloudFront free up to 1 TB/10M requests per month, then ≈ $0.085/GB + $0.012/10k requests. S3 GETs only on cache misses ($0.0004/1k) |
-| Tile server pods | 2 × (250m / 512 Mi) ≈ $15/month idle, scaling with uncached traffic; still pays CloudFront or $0.09/GB direct egress |
+| Chosen: S3 + CloudFront | S3 $0.0245/GB-month stored; CloudFront free up to 1 TB/10M requests per month, then ≈ $0.085/GB + $0.012/10k requests. S3 GETs only on cache misses ($0.00043/1k) |
+| Tile server pods | 2 × (250m / 512 Mi) ≈ $18/month idle, scaling with uncached traffic; still pays CloudFront or $0.09/GB direct egress |
 | Lambda@Edge authorizer | $0.60/1M invocations + $0.00005001/GB-s; a map view is ~50–200 range requests → 10M reads ≈ $6–10/month on top of CloudFront |
 
 ## AWS (CloudFront + S3) vs Cloudflare R2

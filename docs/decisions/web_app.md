@@ -64,7 +64,7 @@ sequenceDiagram
 
 ## Cost
 
-| Option | Estimate (eu-west-1) |
+| Option | Estimate |
 |---|---|
 | Chosen: S3 `web` bucket + CloudFront | ≈ $0 — a few hundred KB in S3; requests inside CloudFront's free tier (1 TB, 10M requests/month) |
 | SPA framework | ≈ $0 hosting (same bucket); CI build minutes only |

@@ -31,7 +31,7 @@ In `terraform/variables.tf`; override with `-var` or a `terraform.tfvars`:
 
 | Variable | Default | |
 |---|---|---|
-| `region` | `eu-west-1` | everything except CloudFront |
+| `region` | `eu-central-1` | everything except CloudFront |
 | `name` | `pmp` | prefix for every resource |
 | `demo_upload_enabled` | `false` | serve `upload.html` and presign browser uploads |
 | `grafana_admin_user_ids` | `[]` | Identity Center user IDs made Grafana admins |

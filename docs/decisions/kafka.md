@@ -47,10 +47,10 @@ sequenceDiagram
 
 ## Cost
 
-| Option | Estimate (eu-west-1) |
+| Option | Estimate |
 |---|---|
-| Chosen, demo: 1 Redpanda pod | ≈ $12/month of node capacity (250m / 1.5 Gi); no durability beyond the pod |
-| Chosen, prod: MSK Serverless | ≈ $0.89/h ≈ $650/month (cluster-hour + 18 partitions), + $0.115/GB in, $0.0575/GB out |
-| MSK provisioned 3 × kafka.t3.small | ≈ $0.15/h ≈ $110/month + $0.11/GB-month storage |
+| Chosen, demo: 1 Redpanda pod | ≈ $13/month of node capacity (250m / 1.5 Gi); no durability beyond the pod |
+| Chosen, prod: MSK Serverless | ≈ $0.93/h ≈ $680/month (cluster-hour + 18 partitions), + $0.12/GB in, $0.06/GB out |
+| MSK provisioned 3 × kafka.t3.small | ≈ $0.16/h ≈ $115/month + $0.119/GB-month storage |
 | SQS + SNS | $0.40/1M requests (SQS), $0.50/1M publishes (SNS); ≈ $0–1/month at demo volume, < $10/month at millions of jobs |
-| Postgres queue | $0 extra at this scale; may force a larger RDS class later (db.t4g.small Multi-AZ ≈ $50/month) |
+| Postgres queue | $0 extra at this scale; may force a larger RDS class later (db.t4g.small Multi-AZ ≈ $54/month) |
