@@ -68,4 +68,4 @@ sequenceDiagram
 |---|---|
 | Chosen: S3 `web` bucket + CloudFront | ≈ $0 — a few hundred KB in S3; requests inside CloudFront's free tier (1 TB, 10M requests/month) |
 | SPA framework | ≈ $0 hosting (same bucket); CI build minutes only |
-| Server-rendered | ≈ $3–7/month more API pod capacity at demo load (100m CPU per replica on t3.large nodes), growing with traffic instead of being absorbed by the CDN |
+| Server-rendered | ≈ $2–4/month more API pod capacity at demo load (100m CPU per replica on t3.medium nodes), growing with traffic instead of being absorbed by the CDN |

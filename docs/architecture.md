@@ -112,4 +112,4 @@ Details, alternatives and cost: [decisions/scaling.md](decisions/scaling.md)
 - Tile reads and `/current` lookups are absorbed by the CDN cache, not the cluster
 - Gateway and backend: HPA on CPU, 2–6 pods
 - Worker: KEDA on consumer lag of `publication.requested`, 1–6 pods (one job per pod, capped by 6 partitions)
-- Nodes: Cluster Autoscaler, 2–4 × t3.large, grows when worker pods are pending, shrinks after ~10 min idle
+- Nodes: Cluster Autoscaler, 2–4 × t3.medium, grows when worker pods are pending, shrinks after ~10 min idle

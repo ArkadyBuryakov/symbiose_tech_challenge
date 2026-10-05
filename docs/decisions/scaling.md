@@ -10,7 +10,7 @@ heaviest traffic, tile reads, never reaches the cluster.
 | gateway, backend | HPA | 2–6 pods | CPU > 70% of requests (100m) |
 | auth | fixed | 2 pods | — only `/internal/verify` on a 10 s cache miss, and sign-ins |
 | worker | KEDA `ScaledObject` | 1–6 pods | consumer lag on `publication.requested`, threshold 1 (one job per pod) |
-| nodes | Cluster Autoscaler | 2–4 × t3.large | pods `Pending` for lack of CPU/memory; idle nodes removed after ~10 min |
+| nodes | Cluster Autoscaler | 2–4 × t3.medium | pods `Pending` for lack of CPU, memory or pod slots (17 per node); idle nodes removed after ~10 min |
 
 Worker pods request 500m CPU, what one job really uses (hashing + multipart
 copy). Those honest requests are what make extra workers go `Pending`, which
@@ -38,7 +38,7 @@ sequenceDiagram
         KEDA->>K: lag of group publication-worker
     end
     KEDA->>W: scale 1 → min(lag, 6)
-    Note over W: ~3 fit on 2 nodes, the rest are Pending
+    Note over W: 2 nodes are nearly full, most are Pending
     CA->>ASG: desired 2 → 3–4
     ASG-->>W: new nodes Ready, pods scheduled
     W->>K: consume, commit offsets → lag falls
@@ -69,10 +69,10 @@ sequenceDiagram
 
 | Option | Idle | Full backlog (6 workers) |
 |---|---:|---:|
-| Chosen: 2–4 × t3.large on demand ($0.096/h each) | ≈ $0.43/h stack total | ≈ $0.53–0.62/h (+1–2 nodes, only while draining) |
-| Karpenter with Spot | Same 2 on-demand base nodes | Extra capacity on Spot, typically 60–70% cheaper: ≈ $0.03–0.04/h per extra node instead of $0.096 |
+| Chosen: 2–4 × t3.medium on demand ($0.048/h each) | ≈ $0.33/h stack total | ≈ $0.38–0.43/h (+1–2 nodes, only while draining) |
+| Karpenter with Spot | Same 2 on-demand base nodes | Extra capacity on Spot, typically 60–70% cheaper: ≈ $0.015–0.02/h per extra node instead of $0.048 |
 | Fargate workers (0.5 vCPU, 1 GB) | −1 worker pod on the nodes | ≈ $0.03/h per running worker, $0 when the queue is empty; ≈ $0.001 per 2-min job |
-| EKS Auto Mode | ≈ +12% on the EC2 price of managed nodes (≈ +$17/month for two) | Same, scales and consolidates automatically |
+| EKS Auto Mode | ≈ +12% on the EC2 price of managed nodes (≈ +$8/month for two) | Same, scales and consolidates automatically |
 
 At demo volume scaling costs nothing extra: the backlog nodes live for
 minutes. See [cost](../cost.md) for the whole stack.

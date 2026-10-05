@@ -5,6 +5,10 @@ module "eks" {
   name               = var.name
   kubernetes_version = "1.36"
 
+  # No control-plane logs: the audit log alone costs ~$25/month in CloudWatch.
+  enabled_log_types           = []
+  create_cloudwatch_log_group = false
+
   # The API is public so `terraform apply` can reach it from your machine.
   endpoint_public_access                   = true
   enable_cluster_creator_admin_permissions = true

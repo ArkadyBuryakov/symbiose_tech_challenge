@@ -53,7 +53,6 @@ locals {
       },
     ]
     otel-collector = [
-      { actions = ["xray:PutTraceSegments", "xray:PutTelemetryRecords"], resources = ["*"] },
       { actions = ["aps:RemoteWrite"], resources = [aws_prometheus_workspace.this.arn] },
     ]
   }

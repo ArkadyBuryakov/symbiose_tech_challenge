@@ -35,7 +35,7 @@ In `terraform/variables.tf`; override with `-var` or a `terraform.tfvars`:
 | `name` | `pmp` | prefix for every resource |
 | `demo_upload_enabled` | `false` | serve `upload.html` and presign browser uploads |
 | `grafana_admin_user_ids` | `[]` | Identity Center user IDs made Grafana admins |
-| `node_instance_type` | `t3.large` | two nodes, up to four |
+| `node_instance_type` | `t3.medium` | two nodes, up to four |
 
 ## After the first apply
 

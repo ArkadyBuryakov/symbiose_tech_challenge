@@ -24,5 +24,5 @@ variable "grafana_admin_user_ids" {
 
 variable "node_instance_type" {
   type    = string
-  default = "t3.large"
+  default = "t3.medium"
 }

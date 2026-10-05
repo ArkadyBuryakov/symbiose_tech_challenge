@@ -28,7 +28,7 @@ below). The MSK settings and IAM are kept here as the production target.
 | `s3-init` | Terraform | Buckets, policies, lifecycle, OAC. |
 | `dev-keys/` | **Secrets Manager** + Secrets Store CSI driver | Mounted at the *same paths* (`/run/keys/...`). |
 | Prometheus / Grafana | Amazon Managed Prometheus / Managed Grafana | The ADOT collector scrapes the pods and remote-writes to AMP. Grafana signs in with IAM Identity Center; Terraform installs the data source and the local dashboard. |
-| Jaeger | AWS X-Ray via the ADOT collector | Services already speak OTLP. |
+| Jaeger | — not deployed | Tracing stays local. The services speak OTLP, so an ADOT `traces` pipeline to X-Ray would add it. |
 
 ### CloudFront behaviours (what the nginx config becomes)
 
@@ -69,7 +69,7 @@ changes are needed for any of them.
 | `PUBLIC_BASE_URL` | `http://localhost:8080` | `https://maps.example.com` |
 | `INTERNAL_JWT_*_KEY_PATH`, `CLOUDFRONT_*_KEY_PATH`, `BETTER_AUTH_SECRET_PATH` | `./dev-keys` bind mount | Secrets Store CSI mount, same paths |
 | `CLOUDFRONT_KEY_PAIR_ID` | `LOCALKEYPAIRID` | the CloudFront **public key ID** in the trusted key group |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://jaeger:4317` (profile) | the ADOT collector service |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://jaeger:4317` (profile) | unset: no trace export |
 | `DEMO_UPLOAD_ENABLED` | `true` | **`false`** |
 | `ENVIRONMENT` | `local` | `prod` |
 | `SERVICE_DB_AUTH` (migrate only) | `password` | `iam`: grant `rds_iam` to the service roles instead of setting passwords |
@@ -147,7 +147,7 @@ its NetworkPolicy is the only fence.
   this cluster's node group only
 
 ### ADOT collector
-* `xray:PutTraceSegments`, `xray:PutTelemetryRecords`
+* `aps:RemoteWrite` on the Prometheus workspace
 
 ### CloudFront
 * Origin Access Control on `publish`: bucket policy allows `s3:GetObject` only

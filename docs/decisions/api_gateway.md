@@ -53,6 +53,6 @@ sequenceDiagram
 
 | Option | Estimate |
 |---|---|
-| Chosen: 2–6 pods on the shared nodes | Idle: 2 × 100m CPU / 256 Mi ≈ $7/month of t3.large capacity, plus the internal ALB ≈ $20/month (shared with all `/api/*`) |
+| Chosen: 2–6 pods on the shared nodes | Idle: 2 × 100m CPU / 256 Mi ≈ $3.50/month of t3.medium capacity, plus the internal ALB ≈ $20/month (shared with all `/api/*`) |
 | Envoy/Kong pods | Similar pod cost (≈ $7–15/month); + ElastiCache `cache.t4g.micro` ≈ $13/month for shared rate limits |
 | AWS API Gateway (HTTP API) + Lambda | $1.20/1M requests + authorizer Lambda ≈ $0.20/1M + compute; ≈ $0 at demo volume, ≈ $35/month at 25M requests. Removes the ALB (−$20/month) |

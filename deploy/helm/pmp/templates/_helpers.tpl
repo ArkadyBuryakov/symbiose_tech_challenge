@@ -11,7 +11,6 @@
 - {name: AWS_REGION, value: {{ .Values.region | quote }}}
 # boto3 reads only this one; the Node SDK reads AWS_REGION.
 - {name: AWS_DEFAULT_REGION, value: {{ .Values.region | quote }}}
-- {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://otel-collector:4317"}
 {{- end }}
 
 {{- define "pmp.dbEnv" -}}

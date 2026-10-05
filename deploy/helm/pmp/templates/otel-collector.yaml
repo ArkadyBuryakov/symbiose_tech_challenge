@@ -1,12 +1,8 @@
-# ADOT collector: the services' OTLP spans -> AWS X-Ray, and every app pod's
-# /metrics -> Amazon Managed Prometheus.
+# ADOT collector: every app pod's /metrics -> Amazon Managed Prometheus.
 {{- define "pmp.otelConfig" -}}
 extensions:
   sigv4auth: {region: {{ .Values.region | quote }}, service: aps}
 receivers:
-  otlp:
-    protocols:
-      grpc: {endpoint: "0.0.0.0:4317"}
   prometheus:
     config:
       scrape_configs:
@@ -25,14 +21,12 @@ receivers:
 processors:
   batch: {}
 exporters:
-  awsxray: {region: {{ .Values.region | quote }}}
   prometheus_remote_write:
     endpoint: {{ .Values.ampRemoteWriteUrl | quote }}
     auth: {authenticator: sigv4auth}
 service:
   extensions: [sigv4auth]
   pipelines:
-    traces: {receivers: [otlp], processors: [batch], exporters: [awsxray]}
     metrics: {receivers: [prometheus], processors: [batch], exporters: [prometheus_remote_write]}
 {{- end }}
 
@@ -66,8 +60,6 @@ spec:
           {{- include "pmp.securityContext" . | nindent 10 }}
           env:
             - {name: AWS_REGION, value: {{ .Values.region | quote }}}
-          ports:
-            - {name: otlp, containerPort: 4317}
           resources:
             requests: {cpu: 50m, memory: 128Mi}
             limits: {memory: 256Mi}
@@ -76,15 +68,6 @@ spec:
       volumes:
         - name: config
           configMap: {name: otel-collector}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: otel-collector
-spec:
-  selector: {app: otel-collector}
-  ports:
-    - {name: otlp, port: 4317, targetPort: otlp}
 ---
 # Pod discovery for the prometheus receiver, in this namespace only.
 apiVersion: rbac.authorization.k8s.io/v1
