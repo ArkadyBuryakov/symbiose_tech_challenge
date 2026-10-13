@@ -90,6 +90,11 @@ services:
       - --advertise-kafka-addr=PLAINTEXT://kafka:9092
       - --rpc-addr=0.0.0.0:33145
       - --advertise-rpc-addr=kafka:33145
+      # dev-container mode turns auto-creation on; topics come from kafka-init
+      # only, so a typo or a lost topic fails loudly instead of appearing with
+      # one partition.
+      - --set
+      - redpanda.auto_create_topics_enabled=false
     volumes:
       - kafka-data:/var/lib/redpanda/data
     healthcheck:

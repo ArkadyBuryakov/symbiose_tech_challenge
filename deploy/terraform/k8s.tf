@@ -58,7 +58,7 @@ resource "helm_release" "cluster_autoscaler" {
 }
 
 # The Redpanda broker (demo stand-in for MSK). Installed before the platform
-# chart and complete only once its post-install Job has created the topics,
+# chart and ready only once the broker's sidecar has created the topics,
 # so no service starts subscribed to a topic that does not exist yet.
 resource "helm_release" "kafka" {
   name      = "${var.name}-kafka"

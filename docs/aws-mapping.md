@@ -21,10 +21,10 @@ below). The MSK settings and IAM are kept here as the production target.
 | `backend` | EKS Deployment (+ HPA) | Reachable only from the gateway (NetworkPolicy). |
 | `worker` | EKS Deployment, scaled on consumer lag (KEDA) | One job per pod; replicas ≤ partitions (6). Each requests 500m CPU, so a backlog makes the Cluster Autoscaler add nodes (2–4). |
 | `postgres` | **RDS for PostgreSQL** 16, Multi-AZ | IAM database authentication for the service roles. |
-| `kafka` (Redpanda) | **Amazon MSK Serverless** (production) · **one Redpanda pod** (the demo in `deploy/`) | MSK: IAM auth, TLS; RF 3 and `min.insync.replicas=2` managed. Demo: the compose image and flags, no auth or TLS, one replica, data in an `emptyDir`; a NetworkPolicy admits only backend, worker, the topic Job and KEDA. It costs nothing beyond the nodes, where MSK Serverless is ≈ $0.89/h (`docs/cost.md`). |
+| `kafka` (Redpanda) | **Amazon MSK Serverless** (production) · **one Redpanda pod** (the demo in `deploy/`) | MSK: IAM auth, TLS; RF 3 and `min.insync.replicas=2` managed. Demo: the compose image and flags, no auth or TLS, one replica, data in an `emptyDir`; a NetworkPolicy admits only backend, worker and KEDA. It costs nothing beyond the nodes, where MSK Serverless is ≈ $0.89/h (`docs/cost.md`). |
 | `s3` (MinIO) | **Amazon S3** — three buckets | `staging` (lifecycle expiry), `publish` (OAC-only), `web` (the static pages, OAC-only). |
 | `migrate`, `migrate-auth` | Helm `pre-install,pre-upgrade` hook Jobs | Same images, same commands. |
-| `kafka-init` | Helm post-install hook Job of the broker's chart (`deploy/helm/kafka`) | The same `kafka-init.sh`. Terraform installs the platform chart only after it, so no service subscribes to a missing topic. On MSK it would need IAM auth flags. |
+| `kafka-init` | Sidecar of the broker pod (`deploy/helm/kafka`) | The same `kafka-init.sh`, rerun whenever the broker starts, because a rescheduled broker loses its topics with its `emptyDir`. The pod is ready, and reachable through its Service, only once they exist, so no service connects to a broker with a missing topic. On MSK it would need IAM auth flags. |
 | `s3-init` | Terraform | Buckets, policies, lifecycle, OAC. |
 | `dev-keys/` | **Secrets Manager** + Secrets Store CSI driver | Mounted at the *same paths* (`/run/keys/...`). |
 | Prometheus / Grafana | Amazon Managed Prometheus / Managed Grafana | The ADOT collector scrapes the pods and remote-writes to AMP. Grafana signs in with IAM Identity Center; Terraform installs the data source and the local dashboard. |

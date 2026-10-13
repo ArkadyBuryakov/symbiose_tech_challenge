@@ -5,6 +5,11 @@
 # reschedule. Nothing is lost for good either way; the worker's reconciler
 # re-publishes jobs stuck in `pending` from the catalogue. The emptyDir also
 # keeps the cluster autoscaler from draining the broker's node.
+#
+# The topics are lost with the log, so they are created by a sidecar of the
+# broker rather than once per release. The pod is ready, and so reachable
+# through the Service, only once they exist: a client that reconnected to a
+# broker without its topics would not look for them again for minutes.
 {{- $host := printf "kafka.%s.svc.cluster.local" .Release.Namespace }}
 {{- $image := "docker.redpanda.com/redpandadata/redpanda:v25.3.2" }}
 apiVersion: apps/v1
@@ -30,10 +35,16 @@ spec:
             - --smp=1
             - --memory=1G
             - --default-log-level=warn
-            - --kafka-addr=PLAINTEXT://0.0.0.0:9092
-            - --advertise-kafka-addr=PLAINTEXT://{{ $host }}:9092
+            # LOCAL is for the topics sidecar, which must reach the broker
+            # before the Service does.
+            - --kafka-addr=PLAINTEXT://0.0.0.0:9092,LOCAL://127.0.0.1:9093
+            - --advertise-kafka-addr=PLAINTEXT://{{ $host }}:9092,LOCAL://127.0.0.1:9093
             - --rpc-addr=0.0.0.0:33145
             - --advertise-rpc-addr={{ $host }}:33145
+            # dev-container mode turns auto-creation on; topics come from the
+            # sidecar only, never with the broker's one-partition default.
+            - --set
+            - redpanda.auto_create_topics_enabled=false
           ports:
             - {name: kafka, containerPort: 9092}
           readinessProbe:
@@ -46,9 +57,31 @@ spec:
             limits: {memory: 1536Mi}
           volumeMounts:
             - {name: data, mountPath: /var/lib/redpanda/data}
+        # ops/kafka/kafka-init.sh, as locally; idempotent, retried until the
+        # broker answers. Ready once the topics exist, which is also what the
+        # release (and so the platform chart after it) waits for.
+        - name: topics
+          image: {{ $image }}
+          command:
+            - bash
+            - -c
+            - until bash /scripts/kafka-init.sh; do sleep 2; done; touch /tmp/ready; exec sleep infinity
+          env:
+            - {name: KAFKA_BROKERS, value: "127.0.0.1:9093"}
+          readinessProbe:
+            exec:
+              command: [test, -f, /tmp/ready]
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 10m, memory: 64Mi}
+            limits: {memory: 128Mi}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts, readOnly: true}
       volumes:
         - name: data
           emptyDir: {}
+        - name: scripts
+          configMap: {name: kafka-init}
 ---
 apiVersion: v1
 kind: Service
@@ -60,7 +93,7 @@ spec:
     - {name: kafka, port: 9092, targetPort: kafka}
 ---
 # No IAM on this broker, so this is what limits who can talk to it: the two
-# services, the topic Job and KEDA (reads consumer lag).
+# services and KEDA (reads consumer lag).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -73,7 +106,7 @@ spec:
     - from:
         - podSelector:
             matchExpressions:
-              - {key: app, operator: In, values: [backend, worker, kafka-topics]}
+              - {key: app, operator: In, values: [backend, worker]}
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: keda}
       ports:
@@ -85,33 +118,3 @@ metadata:
   name: kafka-init
 data:
   kafka-init.sh: {{ .Values.kafkaInit | quote }}
----
-# ops/kafka/kafka-init.sh, as locally. A post-install hook, so it runs once the
-# broker above is ready; Terraform installs the pmp chart only after it. It is
-# idempotent, so every upgrade reruns it.
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: kafka-topics
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-delete-policy: before-hook-creation
-spec:
-  backoffLimit: 5
-  activeDeadlineSeconds: 300
-  template:
-    metadata:
-      labels: {app: kafka-topics}
-    spec:
-      restartPolicy: Never
-      containers:
-        - name: kafka-topics
-          image: {{ $image }}
-          command: [bash, /scripts/kafka-init.sh]
-          env:
-            - {name: KAFKA_BROKERS, value: "{{ $host }}:9092"}
-          volumeMounts:
-            - {name: scripts, mountPath: /scripts, readOnly: true}
-      volumes:
-        - name: scripts
-          configMap: {name: kafka-init}
