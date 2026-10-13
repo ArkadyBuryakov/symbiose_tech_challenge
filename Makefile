@@ -126,6 +126,14 @@ demo: ## Publish a private archive on the deployment in .env (BASE_URL, DEMO_USE
 		DEMO_WRONG_USER="$(call dotenv,DEMO_WRONG_USER)" DEMO_WRONG_USER_PWD="$(call dotenv,DEMO_WRONG_USER_PWD)" \
 		./scripts/aws-demo.sh "$(call dotenv,DEMO_USER)" "$(call dotenv,DEMO_PWD)" $(f)
 
+.PHONY: demo-autoscaling
+demo-autoscaling: ## Queue a backlog on the deployment in .env (BASE_URL, DEMO_USER, DEMO_PWD) and watch workers and nodes scale: make demo-autoscaling [n=60]
+	@for v in BASE_URL DEMO_USER DEMO_PWD; do \
+		grep -q "^$$v=." .env || { echo "set $$v in .env (see .env.example)"; exit 1; }; \
+	done
+	@BASE_URL="$(call dotenv,BASE_URL)" \
+		./scripts/autoscaling-demo.sh "$(call dotenv,DEMO_USER)" "$(call dotenv,DEMO_PWD)" $(n)
+
 .PHONY: synthetic
 synthetic: ## Generate a synthetic PMTiles archive (needs no sample data)
 	./scripts/make-synthetic-pmtiles.sh sample-data/synthetic.pmtiles
