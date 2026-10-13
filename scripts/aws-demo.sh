@@ -2,14 +2,16 @@
 # Private tiles through CloudFront, end to end, on the AWS deployment:
 #
 #   BASE_URL=https://dXXXX.cloudfront.net ./scripts/aws-demo.sh <email> <password> [file.pmtiles]
-#   (or `make aws-demo email=... password=...`, which fills in BASE_URL)
+#   (or `make demo`, which takes all three from .env, or `make aws-demo email=... password=...`)
 #
 #   1. sign in as a tenant user (create one with `make aws-add-user`),
 #   2. upload an archive straight to the staging bucket (presigned PUT),
 #   3. publish it as a private dataset and wait for the worker,
 #   4. with the signed tile cookies: the first range read is a CloudFront miss,
 #      and repeating it is soon served from the edge cache (the 3rd read),
-#   5. without them: 403, although the bytes are now in the cache.
+#   5. without them: 403, although the bytes are now in the cache,
+#   6. with the signed cookies of a user in another tenant: 403 as well
+#      (only if DEMO_WRONG_USER and DEMO_WRONG_USER_PWD are set).
 #
 # Archives are content-addressed, so re-publishing the same file would reuse a
 # URL that is already cached. A unique nonce is appended to a copy of the file:
@@ -55,11 +57,15 @@ fetch() {
         END {print s, (c ? c : "-"), (p ? p : "-"), f, t}'
 }
 
+sign_in() {
+    api -o /dev/null -X POST "${BASE_URL}/api/auth/sign-in/email" \
+        -H 'content-type: application/json' \
+        -d "$(python3 -c 'import json,sys;print(json.dumps({"email":sys.argv[1],"password":sys.argv[2]}))' "$1" "$2")"
+}
+
 # --------------------------------------------------------------------------
 say "Signing in to ${BASE_URL} as ${EMAIL}"
-api -o /dev/null -X POST "${BASE_URL}/api/auth/sign-in/email" \
-    -H 'content-type: application/json' \
-    -d "$(python3 -c 'import json,sys;print(json.dumps({"email":sys.argv[1],"password":sys.argv[2]}))' "$EMAIL" "$PASSWORD")"
+sign_in "$EMAIL" "$PASSWORD"
 ok "signed in"
 
 # --------------------------------------------------------------------------
@@ -132,6 +138,19 @@ read -r CODE CACHE _ TTFB TOTAL < <(fetch)
 echo "  anonymous read: HTTP ${CODE}, x-cache: ${CACHE}, first byte ${TTFB}s, total ${TOTAL}s"
 [[ "$CODE" == "403" ]] || fail "expected 403"
 ok "denied, although the bytes are in the edge cache"
+
+# --------------------------------------------------------------------------
+if [[ -n "${DEMO_WRONG_USER:-}" && -n "${DEMO_WRONG_USER_PWD:-}" ]]; then
+    say "Fetching the same bytes as ${DEMO_WRONG_USER}, a user in another tenant"
+    JAR="${WORK}/wrong-cookies"
+    sign_in "$DEMO_WRONG_USER" "$DEMO_WRONG_USER_PWD"
+    api -o /dev/null -X POST "${API}/tiles/session"
+    ok "signed in and got signed cookies for their own tenant"
+    read -r CODE CACHE _ TTFB TOTAL < <(fetch -b "$JAR")
+    echo "  cross-tenant read: HTTP ${CODE}, x-cache: ${CACHE}, first byte ${TTFB}s, total ${TOTAL}s"
+    [[ "$CODE" == "403" ]] || fail "expected 403"
+    ok "denied — the cookies are scoped to their tenant's path"
+fi
 
 say "Done"
 echo "  Map: ${BASE_URL}/map.html?dataset=${DATASET_ID}"

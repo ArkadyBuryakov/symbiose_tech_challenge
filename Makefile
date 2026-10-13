@@ -110,9 +110,21 @@ seed: ## Create the demo tenants, users and producer API key
 	$(COMPOSE) run --rm --no-deps -T --user 0:0 -v "$(CURDIR)/dev-keys:/run/dev-keys" \
 		-e PRODUCER_API_KEY_PATH=/run/dev-keys/producer-api-key auth node dist/seed.js
 
-.PHONY: demo
-demo: ## Publish a sample archive end to end and print the map URL
+.PHONY: demo-local
+demo-local: ## Publish a sample archive on the local stack and print the map URL
 	./scripts/demo.sh $(f) $(slug)
+
+# Reads one value from .env; the file is not sourced, so passwords need no quoting.
+dotenv = $$(grep '^$(1)=' .env | cut -d= -f2-)
+
+.PHONY: demo
+demo: ## Publish a private archive on the deployment in .env (BASE_URL, DEMO_USER, DEMO_PWD); show CloudFront miss, hit and 403
+	@for v in BASE_URL DEMO_USER DEMO_PWD; do \
+		grep -q "^$$v=." .env || { echo "set $$v in .env (see .env.example)"; exit 1; }; \
+	done
+	@BASE_URL="$(call dotenv,BASE_URL)" \
+		DEMO_WRONG_USER="$(call dotenv,DEMO_WRONG_USER)" DEMO_WRONG_USER_PWD="$(call dotenv,DEMO_WRONG_USER_PWD)" \
+		./scripts/aws-demo.sh "$(call dotenv,DEMO_USER)" "$(call dotenv,DEMO_PWD)" $(f)
 
 .PHONY: synthetic
 synthetic: ## Generate a synthetic PMTiles archive (needs no sample data)

@@ -90,7 +90,7 @@ async function main(): Promise<void> {
   // --- producer API key -------------------------------------------------
   // Keys are hashed at rest, so a key can only be shown when it is minted.
   // It is written to PRODUCER_API_KEY_PATH (dev-keys/producer-api-key via
-  // `make seed`) for `make demo` and the e2e suite. If the key exists but the
+  // `make seed`) for `make demo-local` and the e2e suite. If the key exists but the
   // file does not, the key is replaced: an unrecoverable key is useless.
   const producerId = userIds.get("producer@tenant-a.test");
   const tenantAId = organizationIds.get("tenant-a");

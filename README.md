@@ -52,9 +52,9 @@ Also: [AWS mapping](docs/aws-mapping.md) · [cost](docs/cost.md) ·
 Needs Docker with Compose v2, GNU Make, `curl` and `python3`.
 
 ```bash
-make up      # build and start everything (~2 min the first time)
-make seed    # demo tenants, users and a producer API key
-make demo    # publish a sample archive and print the map URL
+make up           # build and start everything (~2 min the first time)
+make seed         # demo tenants, users and a producer API key
+make demo-local   # publish a sample archive and print the map URL
 ```
 
 Open **http://localhost:8080** and sign in:
@@ -91,14 +91,15 @@ About **$0.43/hour** while it is up ([cost](docs/cost.md)).
 
 | Command | What it shows |
 |---|---|
-| `make demo` | Stage → publish → wait → `206` range read → map URL. `VISIBILITY=private`, `f=file.pmtiles`, `slug=name` |
-| `make synthetic` | Generates `sample-data/synthetic.pmtiles` with tippecanoe (used by `demo` if no sample archive) |
+| `make demo` | On the deployment in `.env` (`BASE_URL`, `DEMO_USER`, `DEMO_PWD`): private publish, then CloudFront miss → hit → `403` without cookies → `403` with another tenant's cookies (`DEMO_WRONG_USER`, `DEMO_WRONG_USER_PWD`). `f=file.pmtiles` |
+| `make demo-local` | On the local stack: stage → publish → wait → `206` range read → map URL. `VISIBILITY=private`, `f=file.pmtiles`, `slug=name` |
+| `make synthetic` | Generates `sample-data/synthetic.pmtiles` with tippecanoe (used by `demo-local` if no sample archive) |
 | `make chaos-duplicate` | Replays a publication message verbatim → still one version |
 | `make chaos-crash-after-copy` | Kills the worker between S3 copy and DB commit → reconciler recovers to the same single version |
 | `make dlq` | Prints the dead-letter topic |
-| `make aws-demo email=... password=...` | On AWS: private publish, then CloudFront miss → hit → `403` without cookies |
+| `make aws-demo email=... password=...` | Same as `make demo`, with the URL from Terraform and the user from the command line |
 
-Private tiles by hand: `VISIBILITY=private make demo`, open the map as Alice
+Private tiles by hand: `VISIBILITY=private make demo-local`, open the map as Alice
 (tiles load), then as Bob (tiles are `403`).
 
 ## Hours spent
