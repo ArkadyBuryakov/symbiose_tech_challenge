@@ -105,3 +105,14 @@ resource "aws_eks_pod_identity_association" "workload" {
   service_account = each.key
   role_arn        = aws_iam_role.workload[each.key].arn
 }
+
+# The EBS CSI driver add-on (eks.tf), with the policy AWS maintains for it.
+resource "aws_iam_role" "ebs_csi" {
+  name               = "${var.name}-ebs-csi"
+  assume_role_policy = data.aws_iam_policy_document.pod_identity_trust.json
+}
+
+resource "aws_iam_role_policy_attachment" "ebs_csi" {
+  role       = aws_iam_role.ebs_csi.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}

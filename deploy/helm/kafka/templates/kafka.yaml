@@ -1,15 +1,15 @@
 # Single Redpanda broker, the same image and flags as docker-compose.yml. It
 # stands in for MSK in this demo deployment (docs/aws-mapping.md).
 #
-# Its log lives in an emptyDir: it survives container restarts but not a
-# reschedule. Nothing is lost for good either way; the worker's reconciler
-# re-publishes jobs stuck in `pending` from the catalogue. The emptyDir also
-# keeps the cluster autoscaler from draining the broker's node.
+# Its log lives on an EBS volume, so a rescheduled broker is still the same
+# cluster. With an emptyDir it came back as a new one, which hands out producer
+# ids from the start again: two clients that had kept theirs then shared one,
+# and the broker dropped one's messages as the other's retries.
 #
-# The topics are lost with the log, so they are created by a sidecar of the
-# broker rather than once per release. The pod is ready, and so reachable
-# through the Service, only once they exist: a client that reconnected to a
-# broker without its topics would not look for them again for minutes.
+# The topics are created by a sidecar of the broker rather than once per
+# release. The pod is ready, and so reachable through the Service, only once
+# they exist: a client that connected to a broker without its topics would not
+# look for them again for minutes.
 {{- $host := printf "kafka.%s.svc.cluster.local" .Release.Namespace }}
 {{- $image := "docker.redpanda.com/redpandadata/redpanda:v25.3.2" }}
 apiVersion: apps/v1
@@ -23,7 +23,12 @@ spec:
   template:
     metadata:
       labels: {app: kafka}
+      annotations:
+        # Scale-down must not move the only broker.
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
     spec:
+      # The image runs as redpanda (101); a new volume belongs to root.
+      securityContext: {fsGroup: 101}
       containers:
         - name: redpanda
           image: {{ $image }}
@@ -79,9 +84,21 @@ spec:
             - {name: scripts, mountPath: /scripts, readOnly: true}
       volumes:
         - name: data
-          emptyDir: {}
+          persistentVolumeClaim: {claimName: kafka-data}
         - name: scripts
           configMap: {name: kafka-init}
+---
+# Provisioned by the EBS CSI driver add-on (deploy/terraform/eks.tf). The
+# volume lives in one AZ, and the broker with it.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kafka-data
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: gp2
+  resources:
+    requests: {storage: 10Gi}
 ---
 apiVersion: v1
 kind: Service

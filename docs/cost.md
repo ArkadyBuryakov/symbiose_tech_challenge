@@ -39,7 +39,7 @@ the end of this page).
 
 These cost nothing extra:
 - **CloudFront:** the distribution, its VPC origin and its OAC.
-- **Kafka (one Redpanda pod), Pod Identity, the add-ons, KEDA, the Cluster Autoscaler and the CSI driver:** all run on the nodes above. The broker keeps its data in an `emptyDir` on the node disk, so there is no EBS volume.
+- **Kafka (one Redpanda pod), Pod Identity, the add-ons, KEDA, the Cluster Autoscaler and the CSI drivers:** all run on the nodes above. The broker keeps its data on a 10 GB gp2 EBS volume, about $1.20 a month.
 - **S3 and ECR:** they cost cents at demo volumes (see below).
 
 ## Usage-dependent costs
@@ -91,6 +91,6 @@ demo is assessed on. For reference, on-demand:
 
 | Kafka | $/hour | Stack total $/hour | Notes |
 |---|---:|---:|---|
-| One Redpanda pod (deployed) | 0 | ≈ 0.33 | 1 replica, no auth or TLS. The data is lost if the pod is rescheduled; the worker's reconciler re-publishes pending jobs. |
+| One Redpanda pod (deployed) | 0 | ≈ 0.33 | 1 replica, no auth or TLS. The data is on one 10 GB EBS volume (≈ $0.002/h), in one AZ. |
 | MSK provisioned, 3 × kafka.t3.small | ≈ 0.16 + $0.119 / GB-month storage | ≈ 0.49 | Needs a third AZ; creation takes 25–40 min; t3.small brokers are for development only. |
 | MSK Serverless, 18 partitions | ≈ 0.93 ($0.90 / cluster-hour + $0.0018 / partition-hour) | ≈ 1.26 | IAM per topic and group, RF 3, `min.insync.replicas=2`. Data $0.12 / GB in, $0.06 / GB out. |

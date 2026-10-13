@@ -28,6 +28,13 @@ module "eks" {
     metrics-server         = {}
     # Secrets Store CSI driver + AWS provider: Secrets Manager -> /run/keys.
     aws-secrets-store-csi-driver-provider = {}
+    # The broker's volume (deploy/helm/kafka).
+    aws-ebs-csi-driver = {
+      pod_identity_association = [{
+        role_arn        = aws_iam_role.ebs_csi.arn
+        service_account = "ebs-csi-controller-sa"
+      }]
+    }
   }
 
   eks_managed_node_groups = {
