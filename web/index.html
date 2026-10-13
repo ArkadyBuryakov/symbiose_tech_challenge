@@ -42,18 +42,35 @@
             </form>
         </section>
 
-        <h2>Datasets</h2>
-        <div class="card" style="padding:0">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Name</th><th>Slug</th><th>Visibility</th>
-                        <th>Current</th><th>Versions</th><th>Updated</th><th></th>
-                    </tr>
-                </thead>
-                <tbody id="datasets"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
-            </table>
-        </div>
+        <section id="datasets-section" hidden>
+            <h2>Datasets</h2>
+            <div class="card" style="padding:0">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th><th>Slug</th><th>Visibility</th>
+                            <th>Current</th><th>Versions</th><th>Updated</th><th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="datasets"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="public-section" hidden>
+            <h2>Public datasets from other organizations</h2>
+            <div class="card" style="padding:0">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th><th>Organization</th><th>Slug</th>
+                            <th>Current</th><th>Updated</th><th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="public-datasets"></tbody>
+                </table>
+            </div>
+        </section>
 
         <section id="detail" hidden>
             <h2 id="detail-title">Versions</h2>

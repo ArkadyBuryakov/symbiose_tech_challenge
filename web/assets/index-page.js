@@ -14,7 +14,10 @@ const els = {
     signinForm: document.getElementById("signin-form"),
     sessionArea: document.getElementById("session-area"),
     uploadLink: document.getElementById("upload-link"),
+    datasetsSection: document.getElementById("datasets-section"),
     datasets: document.getElementById("datasets"),
+    publicSection: document.getElementById("public-section"),
+    publicDatasets: document.getElementById("public-datasets"),
     detail: document.getElementById("detail"),
     detailTitle: document.getElementById("detail-title"),
     versions: document.getElementById("versions"),
@@ -54,6 +57,9 @@ function renderSession() {
     els.sessionArea.innerHTML = "";
     const signedIn = Boolean(session?.user);
     els.signinCard.hidden = signedIn;
+    // An anonymous visitor owns no datasets, so that table would always be empty.
+    els.datasetsSection.hidden = !signedIn;
+    if (!signedIn) els.detail.hidden = true;
     els.uploadLink.hidden = true;
     if (signedIn) void uploadEnabled.then((ok) => (els.uploadLink.hidden = !ok));
 
@@ -124,6 +130,7 @@ els.signinForm.addEventListener("submit", async (event) => {
             document.getElementById("email").value,
             document.getElementById("password").value,
         );
+        els.signinForm.reset();
         session = await api.session();
         renderSession();
         await loadDatasets();
@@ -145,36 +152,33 @@ async function loadDatasets() {
     try {
         page = await api.listDatasets({ limit: 50 });
     } catch (error) {
+        els.publicSection.hidden = true;
         emptyRow(els.datasets, 7, `Could not load datasets: ${error.message}`);
+        if (!session?.user) notify(`Could not load datasets: ${error.message}`, "error");
         return;
     }
-    if (page.items.length === 0) {
-        emptyRow(els.datasets, 7, "No datasets visible to you yet.");
-        return;
-    }
+
+    // Another tenant's public dataset is view-only here: it gets its own table
+    // and no version history.
+    const tenantId = session?.session?.activeOrganizationId;
+    const isForeign = (dataset) =>
+        dataset.visibility === "public" && dataset.tenant_id !== tenantId;
+    const own = page.items.filter((dataset) => !isForeign(dataset));
+    const foreign = page.items.filter(isForeign);
 
     els.datasets.innerHTML = "";
-    for (const dataset of page.items) {
+    if (own.length === 0) emptyRow(els.datasets, 7, "No datasets visible to you yet.");
+    for (const dataset of own) {
         const tr = els.datasets.insertRow();
         tr.insertCell().textContent = dataset.name;
-
-        const slug = tr.insertCell();
-        slug.className = "mono";
-        slug.textContent = dataset.slug;
-
+        slugCell(tr, dataset.slug);
         tr.insertCell().appendChild(pill(dataset.visibility));
         tr.insertCell().textContent = dataset.current_seq ? `v${dataset.current_seq}` : "—";
         tr.insertCell().textContent = dataset.latest_seq;
         tr.insertCell().textContent = formatTime(dataset.updated_at);
 
         const actions = tr.insertCell();
-        if (dataset.current_seq) {
-            const map = document.createElement("a");
-            map.href = `/map.html?dataset=${dataset.id}`;
-            map.textContent = "Map";
-            map.style.marginRight = "10px";
-            actions.appendChild(map);
-        }
+        mapLink(actions, dataset);
         const versions = document.createElement("a");
         versions.href = "#";
         versions.textContent = "Versions";
@@ -184,6 +188,33 @@ async function loadDatasets() {
         };
         actions.appendChild(versions);
     }
+
+    els.publicSection.hidden = foreign.length === 0;
+    els.publicDatasets.innerHTML = "";
+    for (const dataset of foreign) {
+        const tr = els.publicDatasets.insertRow();
+        tr.insertCell().textContent = dataset.name;
+        slugCell(tr, dataset.tenant_id);
+        slugCell(tr, dataset.slug);
+        tr.insertCell().textContent = dataset.current_seq ? `v${dataset.current_seq}` : "—";
+        tr.insertCell().textContent = formatTime(dataset.updated_at);
+        mapLink(tr.insertCell(), dataset);
+    }
+}
+
+function slugCell(tr, text) {
+    const td = tr.insertCell();
+    td.className = "mono";
+    td.textContent = text;
+}
+
+function mapLink(cell, dataset) {
+    if (!dataset.current_seq) return;
+    const map = document.createElement("a");
+    map.href = `/map.html?dataset=${dataset.id}`;
+    map.textContent = "Map";
+    map.style.marginRight = "10px";
+    cell.appendChild(map);
 }
 
 async function showVersions(dataset) {
